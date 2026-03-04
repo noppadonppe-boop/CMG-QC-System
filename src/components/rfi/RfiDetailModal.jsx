@@ -1,0 +1,142 @@
+import Modal from '../common/Modal';
+
+function Field({ label, value }) {
+  if (!value && value !== 0) return null;
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">{label}</span>
+      <span className="text-xs text-slate-800 font-medium">{value}</span>
+    </div>
+  );
+}
+
+function Section({ number, title, color = 'bg-orange-500', children }) {
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-3">
+        <div className={`w-5 h-5 rounded-full ${color} text-white flex items-center justify-center text-[10px] font-bold shrink-0`}>
+          {number}
+        </div>
+        <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">{title}</h3>
+      </div>
+      <div className="grid grid-cols-3 gap-x-6 gap-y-3 pl-7">{children}</div>
+    </div>
+  );
+}
+
+const STAGE_LABELS = ['', 'Create Request', 'Issue to Client', 'Onsite Inspection', 'Complete Document'];
+const STAGE_COLORS = ['', 'bg-orange-500', 'bg-blue-500', 'bg-purple-500', 'bg-green-500'];
+
+export default function RfiDetailModal({ rfi, onClose }) {
+  return (
+    <Modal title={`RFI Detail — ${rfi.rfiNo}`} onClose={onClose} size="xl">
+      {/* Stage Progress Bar */}
+      <div className="mb-6">
+        <div className="flex items-center gap-0">
+          {[1, 2, 3, 4].map((s) => {
+            const done    = rfi.stage > s;
+            const current = rfi.stage === s;
+            return (
+              <div key={s} className="flex items-center flex-1">
+                <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold flex-1 transition-all ${
+                  done    ? 'bg-green-100 text-green-700' :
+                  current ? `${STAGE_COLORS[s]} text-white shadow-md` :
+                            'bg-slate-100 text-slate-400'
+                }`}>
+                  <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${
+                    done    ? 'bg-green-500 text-white' :
+                    current ? 'bg-white/30 text-white' :
+                              'bg-slate-200 text-slate-500'
+                  }`}>
+                    {done ? '✓' : s}
+                  </div>
+                  <span className="truncate">{STAGE_LABELS[s]}</span>
+                </div>
+                {s < 4 && <div className={`w-4 h-0.5 shrink-0 ${rfi.stage > s ? 'bg-green-400' : 'bg-slate-200'}`} />}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="space-y-6 divide-y divide-slate-100">
+        {/* Stage 1 */}
+        <Section number="1" title="RFI Request (Stage 1)">
+          <Field label="Request No."      value={rfi.requestNo} />
+          <Field label="RFI No."          value={rfi.rfiNo} />
+          <Field label="Type of Inspection" value={rfi.typeOfInspection} />
+          <Field label="Request Date (Internal)"  value={rfi.requestDateInternal} />
+          <Field label="Request Time (Internal)"  value={rfi.requestTimeInternal} />
+          <Field label="Due Date"         value={rfi.dueDate} />
+          <Field label="Request Date (Owner)"     value={rfi.requestDateOwner} />
+          <Field label="Request Time (Owner)"     value={rfi.requestTimeOwner} />
+          <Field label="Refer Drawing"    value={rfi.referDrawing} />
+          <Field label="Location"         value={rfi.location} />
+          <Field label="Area"             value={rfi.area} />
+          <Field label="Working Step"     value={rfi.workingStep} />
+          <div className="col-span-3">
+            <Field label="Detail of Inspection" value={rfi.detailInspection} />
+          </div>
+          <Field label="Requested By"     value={rfi.requestedBy} />
+          <Field label="Inspected By"     value={rfi.inspectedBy} />
+          <Field label="Status Insp."     value={rfi.statusInsp} />
+          <Field label="Status Doc"       value={rfi.statusDoc} />
+        </Section>
+
+        {rfi.stage >= 2 && (
+          <Section number="2" title="Issue to Client (Stage 2)" color="bg-blue-500">
+            <Field label="Issue Date"             value={rfi.issueDate} />
+            <Field label="Inspection Package"     value={rfi.inspectionPackage} />
+            <Field label="Schedule Date"          value={rfi.inspectionScheduleDate} />
+            <Field label="Schedule Time"          value={rfi.inspectionScheduleTime} />
+            <div className="col-span-3">
+              <Field label="Description of Inspection" value={rfi.descriptionOfInspection} />
+            </div>
+            <div className="col-span-3">
+              <Field label="Note" value={rfi.stage2Note} />
+            </div>
+          </Section>
+        )}
+
+        {rfi.stage >= 3 && (
+          <Section number="3" title="Onsite Inspection (Stage 3)" color="bg-purple-500">
+            <Field label="Inspection Date" value={rfi.inspectionDate} />
+            <Field label="Result"          value={rfi.result} />
+            <div className="col-span-3">
+              <Field label="Note" value={rfi.stage3Note} />
+            </div>
+          </Section>
+        )}
+
+        {rfi.stage >= 4 && (
+          <Section number="4" title="Complete Document (Stage 4)" color="bg-green-500">
+            <Field label="Result"   value={rfi.stage4Result} />
+            <Field label="Status"   value={rfi.stage4Status} />
+            <div className="col-span-3">
+              <Field label="Note" value={rfi.stage4Note} />
+            </div>
+          </Section>
+        )}
+
+        {/* Concrete/Test section */}
+        {(rfi.concretePourDate || rfi.brand || rfi.status7Day || rfi.status28Day || rfi.steelTestResult || rfi.soilTestResult) && (
+          <Section number="+" title="Concrete / Material Test Data" color="bg-slate-400">
+            <Field label="Pour Date"        value={rfi.concretePourDate} />
+            <Field label="Brand"            value={rfi.brand} />
+            <Field label="7-Day Status"     value={rfi.status7Day} />
+            <Field label="28-Day Status"    value={rfi.status28Day} />
+            <Field label="Steel Test"       value={rfi.steelTestResult} />
+            <Field label="Soil Test"        value={rfi.soilTestResult} />
+          </Section>
+        )}
+      </div>
+
+      <div className="mt-6 flex justify-end">
+        <button onClick={onClose}
+          className="px-5 py-2 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
+          Close
+        </button>
+      </div>
+    </Modal>
+  );
+}
