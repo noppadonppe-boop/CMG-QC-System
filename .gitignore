@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Environment (ไม่ commit ค่า API key / secrets)
+.env
+.env.local
+.env.*.local

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { AppProvider } from './context/AppContext';
 import Layout from './components/layout/Layout';
+import { seedFirebase } from './scripts/seedFirebase';
 import Dashboard from './components/dashboard/Dashboard';
 import ProjectsPage from './components/projects/ProjectsPage';
 import QcDocumentsPage from './components/qcdocuments/QcDocumentsPage';
@@ -25,6 +26,28 @@ const MODULE_TITLES = {
 
 function AppContent() {
   const [activePage, setActivePage] = useState('dashboard');
+  const [seeding, setSeeding] = useState(false);
+  const [seedMessage, setSeedMessage] = useState(null); // { type: 'success'|'error', text }
+
+  async function handleSeed() {
+    setSeedMessage(null);
+    setSeeding(true);
+    try {
+      await seedFirebase();
+      setSeedMessage({ type: 'success', text: 'บันทึก Mock Data ลง Firebase เรียบร้อย กำลัง reload...' });
+      setTimeout(() => window.location.reload(), 800);
+    } catch (e) {
+      const msg = e?.message || String(e);
+      setSeedMessage({
+        type: 'error',
+        text: msg.includes('permission') || msg.includes('PERMISSION_DENIED')
+          ? `Seed ไม่สำเร็จ: ${msg}\n\nไปตั้ง Firestore Rules ใน Firebase Console (เช่น allow read, write: if true สำหรับพัฒนา)`
+          : `Seed ไม่สำเร็จ: ${msg}`,
+      });
+    } finally {
+      setSeeding(false);
+    }
+  }
 
   function renderPage() {
     if (activePage === 'dashboard')    return <Dashboard />;
@@ -41,9 +64,30 @@ function AppContent() {
   }
 
   return (
-    <Layout activePage={activePage} setActivePage={setActivePage}>
-      {renderPage()}
-    </Layout>
+    <>
+      <Layout activePage={activePage} setActivePage={setActivePage}>
+        {renderPage()}
+      </Layout>
+      {/* ปุ่ม Seed Mock Data ลง Firebase - แสดงตลอด */}
+      <div className="fixed bottom-4 right-4 rounded-lg bg-amber-100 border border-amber-400 px-4 py-2 shadow flex flex-col gap-1 max-w-xs">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleSeed}
+            disabled={seeding}
+            className="bg-amber-600 text-white px-3 py-1 rounded text-sm font-medium disabled:opacity-50"
+          >
+            {seeding ? 'กำลัง Seed...' : 'Seed Mock → Firebase'}
+          </button>
+          <span className="text-amber-800 text-xs">นำข้อมูล Mock ขึ้น Firestore</span>
+        </div>
+        {seedMessage && (
+          <p className={`text-xs ${seedMessage.type === 'success' ? 'text-green-700' : 'text-red-700'}`}>
+            {seedMessage.text}
+          </p>
+        )}
+      </div>
+    </>
   );
 }
 

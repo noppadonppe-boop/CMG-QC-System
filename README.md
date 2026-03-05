@@ -1,3 +1,22 @@
+# CMG QC Management System
+
+React + Vite + Firebase Firestore.
+
+## Firebase
+
+- ค่าตั้งต้น Firebase อยู่ใน `.env` (ไม่ commit — ดู `.env.example` สำหรับตัวแปรที่ต้องใส่)
+- โครงสร้าง Firestore: **Collection** `QC-System` → **Document** `root` → **Subcollections** ตามหมวดเมนู (`projects`, `qcDocuments`, `itp`, `rfi`, `materials`, `ncr`, `punchlist`, `handover`, `finalPackage`, `users`)
+
+### นำ Mock Data ขึ้น Firebase (Seed)
+
+1. เปิดแอปด้วย query string `?seed=1` (เช่น `http://localhost:5173/?seed=1`)
+2. กดปุ่ม **"Seed Firebase (Mock Data)"** มุมล่างขวา
+3. หน้าแอปจะ reload และโหลดข้อมูลจาก Firestore
+
+ใน Firebase Console ต้องเปิด Firestore และตั้ง Rules ให้อ่าน/เขียนได้ (เช่น ชั่วคราวใช้ `allow read, write: if true;` สำหรับพัฒนา)
+
+---
+
 # React + Vite
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
