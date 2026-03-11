@@ -2,10 +2,11 @@ import { useState, useMemo } from 'react';
 import {
   Plus, Pencil, Trash2, Search, ExternalLink,
   Layers, ChevronDown, ChevronRight, History, Eye, EyeOff,
-  FileText, Filter
+  FileText, Filter, Copy
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import QcDocModal from './QcDocModal';
+import QcDocModal, { generateTransmittalNo } from './QcDocModal';
+import { useMenuPermissions } from '../../auth/useMenuPermissions';
 
 const STATUS_COLORS = {
   'Approved':         'bg-green-100 text-green-700',
@@ -80,8 +81,52 @@ function getLatestRevDocs(docs) {
   return Object.values(grouped);
 }
 
+// ── Attachment links helper (supports new array format & legacy string) ────────
+function AttachmentLinks({ doc }) {
+  if (Array.isArray(doc.attachments) && doc.attachments.length > 0) {
+    return (
+      <div className="flex flex-col gap-0.5">
+        {doc.attachments.map((f, i) => (
+          <a key={i} href={f.url} target="_blank" rel="noopener noreferrer"
+            className="flex items-center gap-1 text-[11px] text-blue-600 hover:text-blue-800 whitespace-nowrap">
+            <ExternalLink size={10} />{f.name}
+          </a>
+        ))}
+      </div>
+    );
+  }
+  if (doc.drawingLink) {
+    return (
+      <a href={doc.drawingLink} target="_blank" rel="noopener noreferrer"
+        className="flex items-center gap-1 text-[11px] text-blue-600 hover:text-blue-800 whitespace-nowrap">
+        <ExternalLink size={11} /> Open
+      </a>
+    );
+  }
+  return <span className="text-[11px] text-slate-300">—</span>;
+}
+
+// ── Document Title with attached doc files ─────────────────────────────────────
+function TitleCell({ doc, isHistory }) {
+  return (
+    <div className={`text-[11px] ${isHistory ? 'text-slate-400' : 'text-slate-700'}`}>
+      <div className="truncate" title={doc.documentTitle}>{doc.documentTitle}</div>
+      {Array.isArray(doc.docTitleFiles) && doc.docTitleFiles.length > 0 && (
+        <div className="flex flex-col gap-0.5 mt-0.5">
+          {doc.docTitleFiles.map((f, i) => (
+            <a key={i} href={f.url} target="_blank" rel="noopener noreferrer"
+              className="flex items-center gap-1 text-[10px] text-purple-600 hover:text-purple-800 whitespace-nowrap">
+              <ExternalLink size={9} />{f.name}
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Row Component ─────────────────────────────────────────────────────────────
-function DocRow({ doc, isLatest, isHistory, onEdit, onDelete, rowIndex }) {
+function DocRow({ doc, isLatest, isHistory, onEdit, onDelete, onDuplicate, rowIndex }) {
   return (
     <tr className={`group transition-colors ${
       isHistory ? 'bg-slate-50/60 text-slate-400' : 'hover:bg-orange-50/40'
@@ -96,10 +141,8 @@ function DocRow({ doc, isLatest, isHistory, onEdit, onDelete, rowIndex }) {
         </span>
       </td>
       <td className="px-4 py-2.5 font-mono font-semibold text-slate-800 whitespace-nowrap text-[11px]">{doc.documentNo}</td>
-      <td className="px-4 py-2.5 text-slate-700 max-w-[240px]">
-        <div className={`text-[11px] truncate ${isHistory ? 'text-slate-400' : ''}`} title={doc.documentTitle}>
-          {doc.documentTitle}
-        </div>
+      <td className="px-4 py-2.5 max-w-[240px]">
+        <TitleCell doc={doc} isHistory={isHistory} />
       </td>
       <td className="px-4 py-2.5 text-slate-500 whitespace-nowrap text-[11px] font-mono">{doc.receiveDate || '—'}</td>
       <td className="px-4 py-2.5">
@@ -128,37 +171,38 @@ function DocRow({ doc, isLatest, isHistory, onEdit, onDelete, rowIndex }) {
           {doc.byEmail ? '📧 Email' : '🤝 Hand'}
         </span>
       </td>
-      <td className="px-4 py-2.5">
-        {doc.drawingLink ? (
-          <a
-            href={doc.drawingLink}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1 text-[11px] text-blue-600 hover:text-blue-800 whitespace-nowrap"
-          >
-            <ExternalLink size={11} />
-            Open
-          </a>
-        ) : (
-          <span className="text-[11px] text-slate-300">—</span>
-        )}
+      <td className="px-4 py-2.5 min-w-[140px]">
+        <AttachmentLinks doc={doc} />
       </td>
       <td className="px-4 py-2.5">
         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-          <button
-            onClick={() => onEdit(doc)}
-            className="w-7 h-7 rounded-lg bg-blue-50 hover:bg-blue-100 flex items-center justify-center transition-colors"
-            title="Edit"
-          >
-            <Pencil size={12} className="text-blue-600" />
-          </button>
-          <button
-            onClick={() => onDelete(doc)}
-            className="w-7 h-7 rounded-lg bg-red-50 hover:bg-red-100 flex items-center justify-center transition-colors"
-            title="Delete"
-          >
-            <Trash2 size={12} className="text-red-500" />
-          </button>
+          {onDuplicate && (
+            <button
+              onClick={() => onDuplicate(doc)}
+              className="w-7 h-7 rounded-lg bg-amber-50 hover:bg-amber-100 flex items-center justify-center transition-colors"
+              title="Duplicate"
+            >
+              <Copy size={12} className="text-amber-600" />
+            </button>
+          )}
+          {onEdit && (
+            <button
+              onClick={() => onEdit(doc)}
+              className="w-7 h-7 rounded-lg bg-blue-50 hover:bg-blue-100 flex items-center justify-center transition-colors"
+              title="Edit"
+            >
+              <Pencil size={12} className="text-blue-600" />
+            </button>
+          )}
+          {onDelete && (
+            <button
+              onClick={() => onDelete(doc)}
+              className="w-7 h-7 rounded-lg bg-red-50 hover:bg-red-100 flex items-center justify-center transition-colors"
+              title="Delete"
+            >
+              <Trash2 size={12} className="text-red-500" />
+            </button>
+          )}
         </div>
       </td>
     </tr>
@@ -166,14 +210,13 @@ function DocRow({ doc, isLatest, isHistory, onEdit, onDelete, rowIndex }) {
 }
 
 // ── Grouped rows with expand/collapse ─────────────────────────────────────────
-function DocGroup({ docNo, docs, latestId, showAllRevs, onEdit, onDelete, startIndex }) {
+function DocGroup({ docNo, docs, latestId, showAllRevs, onEdit, onDelete, onDuplicate, startIndex }) {
   const [expanded, setExpanded] = useState(false);
   const latestDoc   = docs.find(d => d.id === latestId);
   const historyDocs = docs.filter(d => d.id !== latestId).sort((a, b) => revOrder(b.rev) - revOrder(a.rev));
   const hasHistory  = historyDocs.length > 0;
 
   if (showAllRevs) {
-    // flat display — sorted latest first
     const sorted = [...docs].sort((a, b) => revOrder(b.rev) - revOrder(a.rev));
     return sorted.map((doc, i) => (
       <DocRow
@@ -183,12 +226,12 @@ function DocGroup({ docNo, docs, latestId, showAllRevs, onEdit, onDelete, startI
         isHistory={doc.id !== latestId}
         onEdit={onEdit}
         onDelete={onDelete}
+        onDuplicate={onDuplicate}
         rowIndex={startIndex + i}
       />
     ));
   }
 
-  // Collapsed: show only latest with expand toggle
   return (
     <>
       <tr className="group hover:bg-orange-50/40 transition-colors">
@@ -221,7 +264,7 @@ function DocGroup({ docNo, docs, latestId, showAllRevs, onEdit, onDelete, startI
           </div>
         </td>
         <td className="px-4 py-2.5 max-w-[240px]">
-          <div className="text-[11px] text-slate-700 truncate" title={latestDoc?.documentTitle}>{latestDoc?.documentTitle}</div>
+          <TitleCell doc={latestDoc || {}} isHistory={false} />
         </td>
         <td className="px-4 py-2.5 text-slate-500 whitespace-nowrap text-[11px] font-mono">{latestDoc?.receiveDate || '—'}</td>
         <td className="px-4 py-2.5">
@@ -244,26 +287,32 @@ function DocGroup({ docNo, docs, latestId, showAllRevs, onEdit, onDelete, startI
             {latestDoc?.byEmail ? '📧 Email' : '🤝 Hand'}
           </span>
         </td>
-        <td className="px-4 py-2.5">
-          {latestDoc?.drawingLink ? (
-            <a href={latestDoc.drawingLink} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-[11px] text-blue-600 hover:text-blue-800">
-              <ExternalLink size={11} /> Open
-            </a>
-          ) : <span className="text-[11px] text-slate-300">—</span>}
+        <td className="px-4 py-2.5 min-w-[140px]">
+          <AttachmentLinks doc={latestDoc || {}} />
         </td>
-        <td className="px-4 py-2.5">
-          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-            <button onClick={() => onEdit(latestDoc)} className="w-7 h-7 rounded-lg bg-blue-50 hover:bg-blue-100 flex items-center justify-center transition-colors">
-              <Pencil size={12} className="text-blue-600" />
-            </button>
-            <button onClick={() => onDelete(latestDoc)} className="w-7 h-7 rounded-lg bg-red-50 hover:bg-red-100 flex items-center justify-center transition-colors">
-              <Trash2 size={12} className="text-red-500" />
-            </button>
-          </div>
-        </td>
+        {(onDuplicate || onEdit || onDelete) && (
+          <td className="px-4 py-2.5">
+            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              {onDuplicate && (
+                <button onClick={() => onDuplicate(latestDoc)} className="w-7 h-7 rounded-lg bg-amber-50 hover:bg-amber-100 flex items-center justify-center transition-colors" title="Duplicate">
+                  <Copy size={12} className="text-amber-600" />
+                </button>
+              )}
+              {onEdit && (
+                <button onClick={() => onEdit(latestDoc)} className="w-7 h-7 rounded-lg bg-blue-50 hover:bg-blue-100 flex items-center justify-center transition-colors" title="Edit">
+                  <Pencil size={12} className="text-blue-600" />
+                </button>
+              )}
+              {onDelete && (
+                <button onClick={() => onDelete(latestDoc)} className="w-7 h-7 rounded-lg bg-red-50 hover:bg-red-100 flex items-center justify-center transition-colors" title="Delete">
+                  <Trash2 size={12} className="text-red-500" />
+                </button>
+              )}
+            </div>
+          </td>
+        )}
       </tr>
 
-      {/* History rows (collapsed by default, expand per-group) */}
       {expanded && historyDocs.map((doc, i) => (
         <DocRow
           key={doc.id}
@@ -272,6 +321,7 @@ function DocGroup({ docNo, docs, latestId, showAllRevs, onEdit, onDelete, startI
           isHistory={true}
           onEdit={onEdit}
           onDelete={onDelete}
+          onDuplicate={onDuplicate}
           rowIndex={`  ↳`}
         />
       ))}
@@ -282,14 +332,21 @@ function DocGroup({ docNo, docs, latestId, showAllRevs, onEdit, onDelete, startI
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function QcDocumentsPage() {
   const { qcDocuments, addQcDocument, updateQcDocument, deleteQcDocument, selectedProjectId, selectedProject } = useApp();
+  const { canAction } = useMenuPermissions();
 
-  const [showAllRevs,  setShowAllRevs]  = useState(false);
-  const [search,       setSearch]       = useState('');
-  const [filterCat,    setFilterCat]    = useState('');
-  const [filterStatus, setFilterStatus] = useState('');
-  const [modalMode,    setModalMode]    = useState(null);
-  const [editTarget,   setEditTarget]   = useState(null);
-  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [showAllRevs,    setShowAllRevs]    = useState(false);
+  const [search,         setSearch]         = useState('');
+  const [filterCat,      setFilterCat]      = useState('');
+  const [filterStatus,   setFilterStatus]   = useState('');
+  const [modalMode,      setModalMode]      = useState(null);
+  const [editTarget,     setEditTarget]     = useState(null);
+  const [deleteTarget,   setDeleteTarget]   = useState(null);
+  const [duplicateSource, setDuplicateSource] = useState(null);
+
+  const canAddTransmittal       = canAction('qc-documents', 'addTransmittal');
+  const canDuplicateTransmittal = canAction('qc-documents', 'duplicateTransmittal');
+  const canEditTransmittal      = canAction('qc-documents', 'editTransmittal');
+  const canDeleteTransmittal    = canAction('qc-documents', 'deleteTransmittal');
 
   // Filter to selected project first
   const projectDocs = qcDocuments.filter(d => d.projectId === selectedProjectId);
@@ -330,18 +387,25 @@ export default function QcDocumentsPage() {
   const statuses    = [...new Set(projectDocs.map(d => d.status))];
 
   function handleSave(form) {
-    if (modalMode === 'add') {
-      addQcDocument({ ...form, id: `doc-${Date.now()}` });
-    } else {
+    if (modalMode === 'edit') {
       updateQcDocument(editTarget.id, form);
+    } else {
+      // add or duplicate — both create a new record
+      addQcDocument({ ...form, id: `doc-${Date.now()}` });
     }
     setModalMode(null);
     setEditTarget(null);
+    setDuplicateSource(null);
   }
 
   function handleDelete() {
     deleteQcDocument(deleteTarget.id);
     setDeleteTarget(null);
+  }
+
+  function handleDuplicate(doc) {
+    setDuplicateSource(doc);
+    setModalMode('duplicate');
   }
 
   // Row counter
@@ -357,13 +421,15 @@ export default function QcDocumentsPage() {
             {selectedProject?.name} — Drawing & Transmittal Register
           </p>
         </div>
-        <button
-          onClick={() => setModalMode('add')}
-          className="flex items-center gap-2 px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white text-xs font-semibold rounded-lg transition-colors shadow-sm"
-        >
-          <Plus size={15} />
-          Add Transmittal
-        </button>
+        {canAddTransmittal && (
+          <button
+            onClick={() => setModalMode('add')}
+            className="flex items-center gap-2 px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white text-xs font-semibold rounded-lg transition-colors shadow-sm"
+          >
+            <Plus size={15} />
+            Add Transmittal
+          </button>
+        )}
       </div>
 
       {/* Summary Cards */}
@@ -453,7 +519,7 @@ export default function QcDocumentsPage() {
           <table className="w-full text-xs">
             <thead>
               <tr className="bg-slate-800 text-white">
-                {['#', 'Transmittal No.', 'Trans. Date', 'From', 'Category', 'Document No.', 'Document Title', 'Receive Date', 'Revision', 'Status', 'Delivery', 'Drawing Link', 'Actions'].map(h => (
+                {['#', 'Transmittal No.', 'Trans. Date', 'From', 'Category', 'Document No.', 'Document Title', 'Receive Date', 'Revision', 'Status', 'Delivery', 'Attachments', (canDuplicateTransmittal || canAddTransmittal || canEditTransmittal || canDeleteTransmittal) ? 'Actions' : ''].filter(Boolean).map(h => (
                   <th key={h} className="px-4 py-3 text-left font-semibold whitespace-nowrap text-[11px] tracking-wide">{h}</th>
                 ))}
               </tr>
@@ -477,8 +543,9 @@ export default function QcDocumentsPage() {
                     docs={docs}
                     latestId={latestId}
                     showAllRevs={showAllRevs}
-                    onEdit={(doc) => { setEditTarget(doc); setModalMode('edit'); }}
-                    onDelete={(doc) => setDeleteTarget(doc)}
+                    onDuplicate={canDuplicateTransmittal ? handleDuplicate : null}
+                    onEdit={canEditTransmittal ? (doc) => { setEditTarget(doc); setModalMode('edit'); } : null}
+                    onDelete={canDeleteTransmittal ? (doc) => setDeleteTarget(doc) : null}
                     startIndex={idx}
                   />
                 );
@@ -506,11 +573,13 @@ export default function QcDocumentsPage() {
       </div>
 
       {/* Modals */}
-      {(modalMode === 'add' || modalMode === 'edit') && (
+      {(modalMode === 'add' || modalMode === 'edit' || modalMode === 'duplicate') && (
         <QcDocModal
-          doc={modalMode === 'edit' ? editTarget : null}
+          doc={modalMode === 'edit' ? editTarget : modalMode === 'duplicate' ? duplicateSource : null}
+          isDuplicate={modalMode === 'duplicate'}
+          projectDocs={projectDocs}
           onSave={handleSave}
-          onClose={() => { setModalMode(null); setEditTarget(null); }}
+          onClose={() => { setModalMode(null); setEditTarget(null); setDuplicateSource(null); }}
         />
       )}
       {deleteTarget && (

@@ -4,7 +4,9 @@ import {
   AlertTriangle, Clock, FileCheck2, Send,
   ClipboardCheck, X
 } from 'lucide-react';
-import { useApp } from '../../context/AppContext';
+import { useApp }  from '../../context/AppContext';
+import { useAuth } from '../../auth/AuthContext';
+import { useMenuPermissions } from '../../auth/useMenuPermissions';
 import RfiStage1Modal from './RfiStage1Modal';
 import RfiStage2Modal from './RfiStage2Modal';
 import RfiStage3Modal from './RfiStage3Modal';
@@ -285,22 +287,22 @@ export default function RfiPage() {
   const {
     rfiItems, addRfi, updateRfi, deleteRfi,
     selectedProjectId, selectedProject,
-    currentUser,
   } = useApp();
+  const { userProfile } = useAuth();
+  const { canAction } = useMenuPermissions();
 
-  const isQcDoc     = currentUser.role === 'QcDocCenter';
-  const isInspector = currentUser.role === 'SiteQcInspector';
-  const canCreate   = isQcDoc;
+  const canCreateRfi  = canAction('rfi', 'createRfi');
+  const canAdvanceRfi = canAction('rfi', 'advanceRfi');
+  const canEditRfi    = canAction('rfi', 'editRfi');
+  const canDeleteRfi  = canAction('rfi', 'deleteRfi');
 
-  // Per-card permission resolver — RBAC for each stage action
+  // Per-card permission resolver — ใช้ Set Role เป็นหลัก
   function getCardPerms(rfi) {
     const s = rfi.stage;
     return {
-      // QcDocCenter: can edit S1, advance S1→S2, advance S3→S4, delete any stage
-      // SiteQcInspector: can advance S2→S3 only
-      canAdvance: (isQcDoc && (s === 1 || s === 3)) || (isInspector && s === 2),
-      canEdit:    isQcDoc && s === 1,
-      canDelete:  isQcDoc,
+      canAdvance: canAdvanceRfi,
+      canEdit:    canEditRfi && s === 1,
+      canDelete:  canDeleteRfi,
     };
   }
 
@@ -356,9 +358,10 @@ export default function RfiPage() {
 
   // Advance button dispatcher — opens the correct modal for the next stage
   function handleAdvance(rfi) {
-    if (rfi.stage === 1 && isQcDoc)     { setStage2Modal(rfi); return; }
-    if (rfi.stage === 2 && isInspector) { setStage3Modal(rfi); return; }
-    if (rfi.stage === 3 && isQcDoc)     { setStage4Modal(rfi); return; }
+    if (!canAdvanceRfi) return;
+    if (rfi.stage === 1) { setStage2Modal(rfi); return; }
+    if (rfi.stage === 2) { setStage3Modal(rfi); return; }
+    if (rfi.stage === 3) { setStage4Modal(rfi); return; }
   }
 
   function handleSaveStage2(form) {
@@ -388,11 +391,11 @@ export default function RfiPage() {
   }
 
   function openEdit(rfi) {
-    if (rfi.stage === 1 && isQcDoc) setEditTarget(rfi);
+    if (rfi.stage === 1 && canEditRfi) setEditTarget(rfi);
   }
 
   function handleDelete(rfi) {
-    if (isQcDoc) setDeleteTarget(rfi);
+    if (canDeleteRfi) setDeleteTarget(rfi);
   }
 
   function confirmDelete() {
@@ -433,7 +436,7 @@ export default function RfiPage() {
               </button>
             ))}
           </div>
-          {canCreate && (
+          {canCreateRfi && (
             <button
               onClick={() => setStage1Modal(true)}
               className="flex items-center gap-2 px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white text-xs font-semibold rounded-lg transition-colors shadow-sm"
@@ -463,17 +466,11 @@ export default function RfiPage() {
         ))}
       </div>
 
-      {/* RBAC notice for non-QcDocCenter */}
-      {!canCreate && (
-        <div className={`flex items-center gap-3 px-4 py-3 rounded-xl border text-xs font-medium ${
-          isInspector
-            ? 'bg-purple-50 border-purple-200 text-purple-700'
-            : 'bg-slate-50 border-slate-200 text-slate-600'
-        }`}>
+      {/* Notice for read-only */}
+      {!canCreateRfi && !canAdvanceRfi && !canEditRfi && !canDeleteRfi && (
+        <div className="flex items-center gap-3 px-4 py-3 rounded-xl border text-xs font-medium bg-slate-50 border-slate-200 text-slate-600">
           <ClipboardCheck size={15} />
-          {isInspector
-            ? 'You can fill in Stage 3 (Onsite Inspection) for RFIs that have been issued to the client.'
-            : 'You have read-only access to RFI records. Only QcDocCenter can create and issue RFIs.'}
+          You have read-only access to RFI records.
         </div>
       )}
 

@@ -2,8 +2,9 @@ import {
   FileText, ClipboardList, AlertTriangle, PackageCheck,
   ListChecks, TrendingUp, CheckCircle2, Clock, XCircle
 } from 'lucide-react';
-import { useApp } from '../../context/AppContext';
-import { ROLE_LABELS, ROLE_COLORS } from '../../data/mockData';
+import { useApp }  from '../../context/AppContext';
+import { useAuth } from '../../auth/AuthContext';
+import { ROLE_LABELS, ROLE_COLORS } from '../../auth/constants';
 
 function StatCard({ icon: Icon, label, value, sub, color, bgColor }) {
   return (
@@ -41,10 +42,16 @@ function StatusBadge({ status }) {
 
 export default function Dashboard() {
   const {
-    currentUser, selectedProject,
+    selectedProject,
     qcDocuments, itpItems, rfiItems, materials,
-    ncrItems, punchlist, projects,
+    ncrItems, punchlist, visibleProjects,
   } = useApp();
+  const { userProfile } = useAuth();
+  const userRoles    = userProfile?.role ?? [];
+  const firstName    = userProfile?.firstName ?? '';
+  const lastName     = userProfile?.lastName  ?? '';
+  const displayName  = (firstName + ' ' + lastName).trim() || userProfile?.email || '';
+  const primaryRole  = userRoles[0] ?? '';
 
   const pid = selectedProject?.id;
 
@@ -72,10 +79,12 @@ export default function Dashboard() {
         </div>
         <div className="text-right">
           <div className="text-xs text-slate-500">Logged in as</div>
-          <div className="text-sm font-semibold text-slate-800">{currentUser.name}</div>
-          <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${ROLE_COLORS[currentUser.role]}`}>
-            {ROLE_LABELS[currentUser.role]}
-          </span>
+          <div className="text-sm font-semibold text-slate-800">{displayName}</div>
+          {primaryRole && (
+            <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${ROLE_COLORS[primaryRole] ?? 'bg-slate-100 text-slate-700'}`}>
+              {ROLE_LABELS[primaryRole] ?? primaryRole}
+            </span>
+          )}
         </div>
       </div>
 
@@ -151,7 +160,7 @@ export default function Dashboard() {
       </div>
 
       {/* All Projects Overview - visible to Exec roles */}
-      {['MD', 'CD', 'PM'].includes(currentUser.role) && (
+      {(userRoles.some(r => ['MasterAdmin','SuperAdmin','Admin','MD','CD','PM'].includes(r))) && (
         <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-100">
             <h3 className="text-sm font-semibold text-slate-700">All Projects Overview</h3>
@@ -166,7 +175,7 @@ export default function Dashboard() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {projects.map(p => (
+                {visibleProjects.map(p => (
                   <tr key={p.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-4 py-2.5 font-mono text-slate-600 whitespace-nowrap">{p.projectNo}</td>
                     <td className="px-4 py-2.5 font-semibold text-slate-800 whitespace-nowrap">{p.name}</td>

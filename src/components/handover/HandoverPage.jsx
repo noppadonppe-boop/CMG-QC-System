@@ -1,6 +1,8 @@
 import { useState, useMemo } from 'react';
 import { Plus, Pencil, Trash2, Search, CheckCircle2, AlertTriangle, Lock, Unlock, X } from 'lucide-react';
-import { useApp } from '../../context/AppContext';
+import { useApp }  from '../../context/AppContext';
+import { useAuth } from '../../auth/AuthContext';
+import { useMenuPermissions } from '../../auth/useMenuPermissions';
 import HandoverModal from './HandoverModal';
 
 const STATUS_BADGE = {
@@ -80,15 +82,19 @@ function AreaReadinessCard({ area, punchItems, onProceed, canEdit }) {
 }
 
 export default function HandoverPage() {
-  const { handover, addHandover, updateHandover, deleteHandover, punchlist, selectedProjectId, selectedProject, currentUser } = useApp();
+  const { handover, addHandover, updateHandover, deleteHandover, punchlist, selectedProjectId, selectedProject } = useApp();
+  const { userProfile } = useAuth();
+  const { canAction } = useMenuPermissions();
 
   const [search,     setSearch]     = useState('');
   const [modalMode,  setModalMode]  = useState(null);
   const [editTarget, setEditTarget] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
-  const [blockedArea,  setBlockedArea]  = useState(null); // for gate feedback
+  const [blockedArea,  setBlockedArea]  = useState(null);
 
-  const canEdit = ['QcDocCenter', 'PM'].includes(currentUser.role);
+  const canAddHandover    = canAction('handover', 'addHandover');
+  const canEditHandover   = canAction('handover', 'editHandover');
+  const canDeleteHandover = canAction('handover', 'deleteHandover');
 
   const projectHandovers = handover.filter(h => h.projectId === selectedProjectId);
   const projectPunch     = punchlist.filter(p => p.projectId === selectedProjectId);
@@ -145,7 +151,7 @@ export default function HandoverPage() {
           <h1 className="text-xl font-bold text-slate-800">Area Handover</h1>
           <p className="text-sm text-slate-500 mt-0.5">{selectedProject?.name} — Handover Records</p>
         </div>
-        {canEdit && (
+        {canAddHandover && (
           <button onClick={handleAddClick} className="flex items-center gap-2 px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold rounded-lg transition-colors shadow-sm">
             <Plus size={15} /> Create Handover
           </button>
@@ -201,7 +207,7 @@ export default function HandoverPage() {
                 key={area}
                 area={area}
                 punchItems={projectPunch}
-                canEdit={canEdit}
+                canEdit={canAddHandover}
               />
             ))}
           </div>
@@ -227,7 +233,7 @@ export default function HandoverPage() {
           <table className="w-full text-xs">
             <thead>
               <tr className="bg-slate-800 text-white">
-                {['#', 'Area Name', 'Handover Date', 'Handover To', 'Received By', 'Doc Package Ref.', 'Punch Ready', 'Status', 'Note', canEdit ? 'Actions' : ''].filter(Boolean).map(h => (
+                {['#', 'Area Name', 'Handover Date', 'Handover To', 'Received By', 'Doc Package Ref.', 'Punch Ready', 'Status', 'Note', (canEditHandover || canDeleteHandover) ? 'Actions' : ''].filter(Boolean).map(h => (
                   <th key={h} className="px-4 py-3 text-left font-semibold whitespace-nowrap text-[11px] tracking-wide">{h}</th>
                 ))}
               </tr>
@@ -265,11 +271,15 @@ export default function HandoverPage() {
                     <td className="px-4 py-3 max-w-[180px]">
                       <div className="text-[11px] text-slate-500 truncate" title={item.note}>{item.note || '—'}</div>
                     </td>
-                    {canEdit && (
+                    {(canEditHandover || canDeleteHandover) && (
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button onClick={() => { setEditTarget(item); setModalMode('edit'); }} className="w-7 h-7 rounded-lg bg-blue-50 hover:bg-blue-100 flex items-center justify-center transition-colors"><Pencil size={12} className="text-blue-600" /></button>
-                          <button onClick={() => setDeleteTarget(item)} className="w-7 h-7 rounded-lg bg-red-50 hover:bg-red-100 flex items-center justify-center transition-colors"><Trash2 size={12} className="text-red-500" /></button>
+                          {canEditHandover && (
+                            <button onClick={() => { setEditTarget(item); setModalMode('edit'); }} className="w-7 h-7 rounded-lg bg-blue-50 hover:bg-blue-100 flex items-center justify-center transition-colors"><Pencil size={12} className="text-blue-600" /></button>
+                          )}
+                          {canDeleteHandover && (
+                            <button onClick={() => setDeleteTarget(item)} className="w-7 h-7 rounded-lg bg-red-50 hover:bg-red-100 flex items-center justify-center transition-colors"><Trash2 size={12} className="text-red-500" /></button>
+                          )}
                         </div>
                       </td>
                     )}

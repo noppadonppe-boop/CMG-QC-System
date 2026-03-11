@@ -1,6 +1,8 @@
 import { useState, useMemo } from 'react';
 import { Plus, Pencil, Trash2, Search, ExternalLink, CheckCircle2, Clock, PauseCircle, X, AlertTriangle } from 'lucide-react';
-import { useApp } from '../../context/AppContext';
+import { useApp }  from '../../context/AppContext';
+import { useAuth } from '../../auth/AuthContext';
+import { useMenuPermissions } from '../../auth/useMenuPermissions';
 import PunchModal from './PunchModal';
 
 const STATUS_BADGE = {
@@ -45,7 +47,9 @@ function ConfirmDelete({ item, onConfirm, onCancel }) {
 }
 
 export default function PunchListPage() {
-  const { punchlist, addPunch, updatePunch, deletePunch, selectedProjectId, selectedProject, currentUser } = useApp();
+  const { punchlist, addPunch, updatePunch, deletePunch, selectedProjectId, selectedProject } = useApp();
+  const { userProfile } = useAuth();
+  const { canAction } = useMenuPermissions();
 
   const [search,       setSearch]       = useState('');
   const [filterStatus, setFilterStatus] = useState('');
@@ -55,7 +59,9 @@ export default function PunchListPage() {
   const [editTarget,   setEditTarget]   = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
 
-  const canEdit = ['QcDocCenter', 'SiteQcInspector', 'PM'].includes(currentUser.role);
+  const canAddPunch    = canAction('punchlist', 'addPunch');
+  const canEditPunch   = canAction('punchlist', 'editPunch');
+  const canDeletePunch = canAction('punchlist', 'deletePunch');
 
   const projectItems = punchlist.filter(p => p.projectId === selectedProjectId);
 
@@ -96,7 +102,7 @@ export default function PunchListPage() {
           <h1 className="text-xl font-bold text-slate-800">Punch List</h1>
           <p className="text-sm text-slate-500 mt-0.5">{selectedProject?.name} — Defect & Snag Tracking</p>
         </div>
-        {canEdit && (
+        {canAddPunch && (
           <button onClick={() => setModalMode('add')} className="flex items-center gap-2 px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold rounded-lg transition-colors shadow-sm">
             <Plus size={15} /> Add Punch Item
           </button>
@@ -185,7 +191,7 @@ export default function PunchListPage() {
           <table className="w-full text-xs">
             <thead>
               <tr className="bg-slate-800 text-white">
-                {['#', 'Punch No.', 'Cat.', 'Description', 'Area / Location', 'Open Date', 'Insp. Date', 'Status', 'Note', 'Photo', canEdit ? 'Actions' : ''].filter(Boolean).map(h => (
+                {['#', 'Punch No.', 'Cat.', 'Description', 'Area / Location', 'Open Date', 'Insp. Date', 'Status', 'Note', 'Photo', (canEditPunch || canDeletePunch) ? 'Actions' : ''].filter(Boolean).map(h => (
                   <th key={h} className="px-4 py-3 text-left font-semibold whitespace-nowrap text-[11px] tracking-wide">{h}</th>
                 ))}
               </tr>
@@ -226,11 +232,15 @@ export default function PunchListPage() {
                       <a href={item.openPhoto} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-[11px] text-blue-600 hover:text-blue-800 whitespace-nowrap"><ExternalLink size={11} /> View</a>
                     ) : <span className="text-[11px] text-slate-300">—</span>}
                   </td>
-                  {canEdit && (
+                  {(canEditPunch || canDeletePunch) && (
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onClick={() => { setEditTarget(item); setModalMode('edit'); }} className="w-7 h-7 rounded-lg bg-blue-50 hover:bg-blue-100 flex items-center justify-center transition-colors"><Pencil size={12} className="text-blue-600" /></button>
-                        <button onClick={() => setDeleteTarget(item)} className="w-7 h-7 rounded-lg bg-red-50 hover:bg-red-100 flex items-center justify-center transition-colors"><Trash2 size={12} className="text-red-500" /></button>
+                        {canEditPunch && (
+                          <button onClick={() => { setEditTarget(item); setModalMode('edit'); }} className="w-7 h-7 rounded-lg bg-blue-50 hover:bg-blue-100 flex items-center justify-center transition-colors"><Pencil size={12} className="text-blue-600" /></button>
+                        )}
+                        {canDeletePunch && (
+                          <button onClick={() => setDeleteTarget(item)} className="w-7 h-7 rounded-lg bg-red-50 hover:bg-red-100 flex items-center justify-center transition-colors"><Trash2 size={12} className="text-red-500" /></button>
+                        )}
                       </div>
                     </td>
                   )}

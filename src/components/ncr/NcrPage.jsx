@@ -3,7 +3,9 @@ import {
   Plus, Pencil, Trash2, Search, ExternalLink,
   AlertOctagon, CheckCircle2, XCircle, Clock, MessageSquare, X
 } from 'lucide-react';
-import { useApp } from '../../context/AppContext';
+import { useApp }  from '../../context/AppContext';
+import { useAuth } from '../../auth/AuthContext';
+import { useMenuPermissions } from '../../auth/useMenuPermissions';
 import NcrModal from './NcrModal';
 
 const STATUS_BADGE = {
@@ -53,7 +55,9 @@ function ConfirmDelete({ item, onConfirm, onCancel }) {
 }
 
 export default function NcrPage() {
-  const { ncrItems, addNcr, updateNcr, deleteNcr, selectedProjectId, selectedProject, currentUser } = useApp();
+  const { ncrItems, addNcr, updateNcr, deleteNcr, selectedProjectId, selectedProject } = useApp();
+  const { userProfile } = useAuth();
+  const { canAction } = useMenuPermissions();
 
   const [search,       setSearch]       = useState('');
   const [filterStatus, setFilterStatus] = useState('');
@@ -63,7 +67,9 @@ export default function NcrPage() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [expandRow,    setExpandRow]    = useState(null);
 
-  const canEdit = currentUser.role === 'QcDocCenter';
+  const canAddNcr    = canAction('ncr', 'addNcr');
+  const canEditNcr   = canAction('ncr', 'editNcr');
+  const canDeleteNcr = canAction('ncr', 'deleteNcr');
 
   const projectItems = ncrItems.filter(n => n.projectId === selectedProjectId);
 
@@ -105,7 +111,7 @@ export default function NcrPage() {
           <h1 className="text-xl font-bold text-slate-800">NCR Management</h1>
           <p className="text-sm text-slate-500 mt-0.5">{selectedProject?.name} — Non-Conformance Reports</p>
         </div>
-        {canEdit && (
+        {canAddNcr && (
           <button
             onClick={() => setModalMode('add')}
             className="flex items-center gap-2 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold rounded-lg transition-colors shadow-sm"
@@ -183,7 +189,7 @@ export default function NcrPage() {
           <table className="w-full text-xs">
             <thead>
               <tr className="bg-slate-800 text-white">
-                {['#', 'NCR No.', 'Issue Date', 'Type', 'Category', 'Description', 'Assigned To', 'Action to Close', 'Attachment', 'Status', canEdit ? 'Actions' : ''].filter(Boolean).map(h => (
+                {['#', 'NCR No.', 'Issue Date', 'Type', 'Category', 'Description', 'Assigned To', 'Action to Close', 'Attachment', 'Status', (canEditNcr || canDeleteNcr) ? 'Actions' : ''].filter(Boolean).map(h => (
                   <th key={h} className="px-4 py-3 text-left font-semibold whitespace-nowrap text-[11px] tracking-wide">{h}</th>
                 ))}
               </tr>
@@ -251,24 +257,28 @@ export default function NcrPage() {
                         {item.status}
                       </span>
                     </td>
-                    {canEdit && (
+                    {(canEditNcr || canDeleteNcr) && (
                       <td className="px-4 py-3">
                         <div
                           className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
                           onClick={e => e.stopPropagation()}
                         >
-                          <button
-                            onClick={() => { setEditTarget(item); setModalMode('edit'); }}
-                            className="w-7 h-7 rounded-lg bg-blue-50 hover:bg-blue-100 flex items-center justify-center transition-colors"
-                          >
-                            <Pencil size={12} className="text-blue-600" />
-                          </button>
-                          <button
-                            onClick={() => setDeleteTarget(item)}
-                            className="w-7 h-7 rounded-lg bg-red-50 hover:bg-red-100 flex items-center justify-center transition-colors"
-                          >
-                            <Trash2 size={12} className="text-red-500" />
-                          </button>
+                          {canEditNcr && (
+                            <button
+                              onClick={() => { setEditTarget(item); setModalMode('edit'); }}
+                              className="w-7 h-7 rounded-lg bg-blue-50 hover:bg-blue-100 flex items-center justify-center transition-colors"
+                            >
+                              <Pencil size={12} className="text-blue-600" />
+                            </button>
+                          )}
+                          {canDeleteNcr && (
+                            <button
+                              onClick={() => setDeleteTarget(item)}
+                              className="w-7 h-7 rounded-lg bg-red-50 hover:bg-red-100 flex items-center justify-center transition-colors"
+                            >
+                              <Trash2 size={12} className="text-red-500" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     )}
@@ -276,7 +286,7 @@ export default function NcrPage() {
                   {/* Expandable detail row */}
                   {expandRow === item.id && (
                     <tr key={`${item.id}-detail`} className="bg-rose-50/40">
-                      <td colSpan={canEdit ? 11 : 10} className="px-6 py-4">
+                      <td colSpan={(canEditNcr || canDeleteNcr) ? 11 : 10} className="px-6 py-4">
                         <div className="grid grid-cols-3 gap-6">
                           <div>
                             <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Description</div>

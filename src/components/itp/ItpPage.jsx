@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { Plus, Pencil, Trash2, Search, ExternalLink, ClipboardList } from 'lucide-react';
-import { useApp } from '../../context/AppContext';
+import { useApp }  from '../../context/AppContext';
+import { useAuth } from '../../auth/AuthContext';
+import { useMenuPermissions } from '../../auth/useMenuPermissions';
 import ItpModal from './ItpModal';
 
 const ITP_BY_COLORS = {
@@ -45,7 +47,9 @@ function ConfirmDelete({ item, onConfirm, onCancel }) {
 }
 
 export default function ItpPage() {
-  const { itpItems, addItp, updateItp, deleteItp, selectedProjectId, selectedProject, currentUser } = useApp();
+  const { itpItems, addItp, updateItp, deleteItp, selectedProjectId, selectedProject } = useApp();
+  const { userProfile } = useAuth();
+  const { canAction } = useMenuPermissions();
 
   const [search,       setSearch]       = useState('');
   const [filterType,   setFilterType]   = useState('');
@@ -54,7 +58,9 @@ export default function ItpPage() {
   const [editTarget,   setEditTarget]   = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
 
-  const canEdit = ['MD', 'CD', 'PM', 'QcDocCenter'].includes(currentUser.role);
+  const canAddItp    = canAction('itp', 'addItp');
+  const canEditItp   = canAction('itp', 'editItp');
+  const canDeleteItp = canAction('itp', 'deleteItp');
 
   const projectItems = itpItems.filter(i => i.projectId === selectedProjectId);
 
@@ -93,7 +99,7 @@ export default function ItpPage() {
             {selectedProject?.name} — Inspection &amp; Test Plans
           </p>
         </div>
-        {canEdit && (
+        {canAddItp && (
           <button
             onClick={() => setModalMode('add')}
             className="flex items-center gap-2 px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white text-xs font-semibold rounded-lg transition-colors shadow-sm"
@@ -160,7 +166,7 @@ export default function ItpPage() {
           <table className="w-full text-xs">
             <thead>
               <tr className="bg-slate-800 text-white">
-                {['#', 'ITP Item / Description', 'ITP By', 'Type ITC', 'Attachment', 'Note', canEdit ? 'Actions' : ''].filter(Boolean).map(h => (
+                {['#', 'ITP Item / Description', 'ITP By', 'Type ITC', 'Attachment', 'Note', (canEditItp || canDeleteItp) ? 'Actions' : ''].filter(Boolean).map(h => (
                   <th key={h} className="px-4 py-3 text-left font-semibold whitespace-nowrap text-[11px] tracking-wide">{h}</th>
                 ))}
               </tr>
@@ -202,21 +208,25 @@ export default function ItpPage() {
                   <td className="px-4 py-3 text-slate-500 max-w-[200px]">
                     <div className="text-[11px] truncate" title={item.note}>{item.note || '—'}</div>
                   </td>
-                  {canEdit && (
+                  {(canEditItp || canDeleteItp) && (
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button
-                          onClick={() => { setEditTarget(item); setModalMode('edit'); }}
-                          className="w-7 h-7 rounded-lg bg-blue-50 hover:bg-blue-100 flex items-center justify-center transition-colors"
-                        >
-                          <Pencil size={12} className="text-blue-600" />
-                        </button>
-                        <button
-                          onClick={() => setDeleteTarget(item)}
-                          className="w-7 h-7 rounded-lg bg-red-50 hover:bg-red-100 flex items-center justify-center transition-colors"
-                        >
-                          <Trash2 size={12} className="text-red-500" />
-                        </button>
+                        {canEditItp && (
+                          <button
+                            onClick={() => { setEditTarget(item); setModalMode('edit'); }}
+                            className="w-7 h-7 rounded-lg bg-blue-50 hover:bg-blue-100 flex items-center justify-center transition-colors"
+                          >
+                            <Pencil size={12} className="text-blue-600" />
+                          </button>
+                        )}
+                        {canDeleteItp && (
+                          <button
+                            onClick={() => setDeleteTarget(item)}
+                            className="w-7 h-7 rounded-lg bg-red-50 hover:bg-red-100 flex items-center justify-center transition-colors"
+                          >
+                            <Trash2 size={12} className="text-red-500" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   )}

@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import Modal from '../common/Modal';
 import { FormField, Input, Select, Textarea, FormGrid } from '../common/FormField';
-import { useApp } from '../../context/AppContext';
+import { useApp }  from '../../context/AppContext';
+import { useAuth } from '../../auth/AuthContext';
 
 const INSPECTION_TYPES = [
   'Concrete Pour', 'Rebar Inspection', 'Steel Erection', 'Pile Driving',
@@ -28,10 +29,12 @@ const EMPTY = {
 };
 
 export default function RfiStage1Modal({ rfi, onSave, onClose }) {
-  const { currentUser, selectedProject } = useApp();
+  const { selectedProject } = useApp();
+  const { userProfile }     = useAuth();
+  const displayName = [userProfile?.firstName, userProfile?.lastName].filter(Boolean).join(' ') || userProfile?.email || '';
   const [form, setForm] = useState(rfi ? { ...rfi } : {
     ...EMPTY,
-    requestedBy: currentUser.name,
+    requestedBy: displayName,
   });
 
   const set = (field) => (e) => setForm(f => ({ ...f, [field]: e.target.value }));

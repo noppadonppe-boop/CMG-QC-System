@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Plus, Pencil, Trash2, Search, Building2, MapPin, User, Calendar } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { useMenuPermissions } from '../../auth/useMenuPermissions';
 import ProjectModal from './ProjectModal';
 
 const STATUS_COLORS = {
@@ -48,7 +49,8 @@ function ConfirmDelete({ project, onConfirm, onCancel }) {
 }
 
 export default function ProjectsPage() {
-  const { projects, addProject, updateProject, deleteProject, setSelectedProjectId } = useApp();
+  const { visibleProjects: projects, addProject, updateProject, deleteProject, setSelectedProjectId } = useApp();
+  const { canAction } = useMenuPermissions();
   const [search, setSearch]         = useState('');
   const [modalMode, setModalMode]   = useState(null); // null | 'add' | 'edit'
   const [editTarget, setEditTarget] = useState(null);
@@ -80,6 +82,10 @@ export default function ProjectsPage() {
     setDeleteTarget(null);
   }
 
+  const canAddProject = canAction('projects', 'addProject');
+  const canEditProject = canAction('projects', 'editProject');
+  const canDeleteProject = canAction('projects', 'deleteProject');
+
   return (
     <div className="space-y-5">
       {/* Header */}
@@ -88,13 +94,15 @@ export default function ProjectsPage() {
           <h1 className="text-xl font-bold text-slate-800">Project Data Management</h1>
           <p className="text-sm text-slate-500 mt-0.5">{projects.length} projects in system</p>
         </div>
-        <button
-          onClick={() => setModalMode('add')}
-          className="flex items-center gap-2 px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white text-xs font-semibold rounded-lg transition-colors shadow-sm"
-        >
-          <Plus size={15} />
-          Add Project
-        </button>
+        {canAddProject && (
+          <button
+            onClick={() => setModalMode('add')}
+            className="flex items-center gap-2 px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white text-xs font-semibold rounded-lg transition-colors shadow-sm"
+          >
+            <Plus size={15} />
+            Add Project
+          </button>
+        )}
       </div>
 
       {/* Search */}
@@ -166,20 +174,24 @@ export default function ProjectsPage() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button
-                        onClick={() => openEdit(p)}
-                        className="w-7 h-7 rounded-lg bg-blue-50 hover:bg-blue-100 flex items-center justify-center transition-colors"
-                        title="Edit project"
-                      >
-                        <Pencil size={13} className="text-blue-600" />
-                      </button>
-                      <button
-                        onClick={() => setDeleteTarget(p)}
-                        className="w-7 h-7 rounded-lg bg-red-50 hover:bg-red-100 flex items-center justify-center transition-colors"
-                        title="Delete project"
-                      >
-                        <Trash2 size={13} className="text-red-500" />
-                      </button>
+                      {canEditProject && (
+                        <button
+                          onClick={() => openEdit(p)}
+                          className="w-7 h-7 rounded-lg bg-blue-50 hover:bg-blue-100 flex items-center justify-center transition-colors"
+                          title="Edit project"
+                        >
+                          <Pencil size={13} className="text-blue-600" />
+                        </button>
+                      )}
+                      {canDeleteProject && (
+                        <button
+                          onClick={() => setDeleteTarget(p)}
+                          className="w-7 h-7 rounded-lg bg-red-50 hover:bg-red-100 flex items-center justify-center transition-colors"
+                          title="Delete project"
+                        >
+                          <Trash2 size={13} className="text-red-500" />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>

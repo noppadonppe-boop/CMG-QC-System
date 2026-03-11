@@ -4,7 +4,9 @@ import {
   ClipboardList, Package, AlertOctagon, FileCheck2,
   CheckCircle2, Clock, Archive, FileText, Eye
 } from 'lucide-react';
-import { useApp } from '../../context/AppContext';
+import { useApp }  from '../../context/AppContext';
+import { useAuth } from '../../auth/AuthContext';
+import { useMenuPermissions } from '../../auth/useMenuPermissions';
 import FinalPackageModal from './FinalPackageModal';
 
 // ── Pillar config ─────────────────────────────────────────────────────────────
@@ -271,7 +273,9 @@ function CompletenessGauge({ items }) {
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function FinalPackagePage() {
-  const { finalPackage, addFinalPackage, updateFinalPackage, deleteFinalPackage, selectedProjectId, selectedProject, currentUser } = useApp();
+  const { finalPackage, addFinalPackage, updateFinalPackage, deleteFinalPackage, selectedProjectId, selectedProject } = useApp();
+  const { userProfile } = useAuth();
+  const { canAction } = useMenuPermissions();
 
   const [modalMode,    setModalMode]    = useState(null);
   const [editTarget,   setEditTarget]   = useState(null);
@@ -280,7 +284,9 @@ export default function FinalPackagePage() {
   const [search,       setSearch]       = useState('');
   const [viewMode,     setViewMode]     = useState('pillars'); // 'pillars' | 'table'
 
-  const canEdit = ['QcDocCenter', 'PM', 'MD', 'CD'].includes(currentUser.role);
+  const canAddFinalDoc    = canAction('final-package', 'addFinalDoc');
+  const canEditFinalDoc   = canAction('final-package', 'editFinalDoc');
+  const canDeleteFinalDoc = canAction('final-package', 'deleteFinalDoc');
 
   const projectItems = finalPackage.filter(f => f.projectId === selectedProjectId);
 
@@ -331,7 +337,7 @@ export default function FinalPackagePage() {
               </button>
             ))}
           </div>
-          {canEdit && (
+          {canAddFinalDoc && (
             <button onClick={() => { setDefaultPillar(null); setModalMode('add'); }}
               className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-lg transition-colors shadow-sm">
               <Plus size={15} /> Add Document
@@ -365,10 +371,10 @@ export default function FinalPackagePage() {
               key={pillar.key}
               pillar={pillar}
               items={filtered.filter(f => f.pillar === pillar.key)}
-              canEdit={canEdit}
+              canEdit={canAddFinalDoc}
               onAdd={openAddForPillar}
-              onEdit={item => { setEditTarget(item); setModalMode('edit'); }}
-              onDelete={setDeleteTarget}
+              onEdit={canEditFinalDoc ? (item => { setEditTarget(item); setModalMode('edit'); }) : null}
+              onDelete={canDeleteFinalDoc ? setDeleteTarget : null}
             />
           ))}
         </div>
@@ -381,7 +387,7 @@ export default function FinalPackagePage() {
             <table className="w-full text-xs">
               <thead>
                 <tr className="bg-slate-800 text-white">
-                  {['#', 'Pillar', 'Title', 'Ref.', 'Date', 'Status', 'Description', 'File', canEdit ? 'Actions' : ''].filter(Boolean).map(h => (
+                  {['#', 'Pillar', 'Title', 'Ref.', 'Date', 'Status', 'Description', 'File', (canEditFinalDoc || canDeleteFinalDoc) ? 'Actions' : ''].filter(Boolean).map(h => (
                     <th key={h} className="px-4 py-3 text-left font-semibold whitespace-nowrap text-[11px] tracking-wide">{h}</th>
                   ))}
                 </tr>
@@ -419,11 +425,15 @@ export default function FinalPackagePage() {
                           <a href={item.fileLink} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-[11px] text-blue-600 hover:text-blue-800 whitespace-nowrap"><ExternalLink size={11} /> View</a>
                         ) : <span className="text-[11px] text-slate-300">—</span>}
                       </td>
-                      {canEdit && (
+                      {(canEditFinalDoc || canDeleteFinalDoc) && (
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button onClick={() => { setEditTarget(item); setModalMode('edit'); }} className="w-7 h-7 rounded-lg bg-blue-50 hover:bg-blue-100 flex items-center justify-center transition-colors"><Pencil size={12} className="text-blue-600" /></button>
-                            <button onClick={() => setDeleteTarget(item)} className="w-7 h-7 rounded-lg bg-red-50 hover:bg-red-100 flex items-center justify-center transition-colors"><Trash2 size={12} className="text-red-500" /></button>
+                            {canEditFinalDoc && (
+                              <button onClick={() => { setEditTarget(item); setModalMode('edit'); }} className="w-7 h-7 rounded-lg bg-blue-50 hover:bg-blue-100 flex items-center justify-center transition-colors"><Pencil size={12} className="text-blue-600" /></button>
+                            )}
+                            {canDeleteFinalDoc && (
+                              <button onClick={() => setDeleteTarget(item)} className="w-7 h-7 rounded-lg bg-red-50 hover:bg-red-100 flex items-center justify-center transition-colors"><Trash2 size={12} className="text-red-500" /></button>
+                            )}
                           </div>
                         </td>
                       )}

@@ -7,7 +7,9 @@ import {
   addDoc,
   deleteDoc,
   writeBatch,
+  onSnapshot,
   serverTimestamp,
+  runTransaction,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 
@@ -99,15 +101,52 @@ export async function setCategoryBatch(category, items) {
   await batch.commit();
 }
 
+/**
+ * Subscribe to a category in realtime. Returns unsubscribe function.
+ * @param {string} category
+ * @param {(docs: any[]) => void} onData
+ */
+export function subscribeCategory(category, onData) {
+  return onSnapshot(
+    subcollectionRef(category),
+    (snap) => onData(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+    () => {}, // silent error
+  );
+}
+
+/**
+ * Update an item with optimistic conflict detection.
+ * Throws Error('CONFLICT') if updatedAt has changed since lastUpdatedAt.
+ */
+export async function updateItemSafe(category, id, changes, lastUpdatedAt) {
+  const ref = docRef(category, id);
+  return runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists()) throw new Error('NOT_FOUND');
+
+    if (lastUpdatedAt) {
+      const remoteMs = snap.data().updatedAt?.toMillis?.() ?? 0;
+      const localMs  = typeof lastUpdatedAt.toMillis === 'function'
+        ? lastUpdatedAt.toMillis()
+        : lastUpdatedAt;
+      if (remoteMs > localMs) throw new Error('CONFLICT');
+    }
+
+    const clean = stripUndefined({ ...changes });
+    clean.updatedAt = serverTimestamp();
+    tx.set(ref, clean, { merge: true });
+  });
+}
+
 export const categories = {
-  users: 'users',
-  projects: 'projects',
-  qcDocuments: 'qcDocuments',
-  itp: 'itp',
-  rfi: 'rfi',
-  materials: 'materials',
-  ncr: 'ncr',
-  punchlist: 'punchlist',
-  handover: 'handover',
+  users:        'users',
+  projects:     'projects',
+  qcDocuments:  'qcDocuments',
+  itp:          'itp',
+  rfi:          'rfi',
+  materials:    'materials',
+  ncr:          'ncr',
+  punchlist:    'punchlist',
+  handover:     'handover',
   finalPackage: 'finalPackage',
 };

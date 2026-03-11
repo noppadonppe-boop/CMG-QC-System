@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { Plus, Pencil, Trash2, Search, ExternalLink, Package, CheckCircle2, XCircle, Clock, PauseCircle } from 'lucide-react';
-import { useApp } from '../../context/AppContext';
+import { useApp }  from '../../context/AppContext';
+import { useAuth } from '../../auth/AuthContext';
+import { useMenuPermissions } from '../../auth/useMenuPermissions';
 import MaterialModal from './MaterialModal';
 
 const RESULT_BADGE = {
@@ -44,7 +46,9 @@ function ConfirmDelete({ item, onConfirm, onCancel }) {
 }
 
 export default function MaterialsPage() {
-  const { materials, addMaterial, updateMaterial, deleteMaterial, selectedProjectId, selectedProject, currentUser } = useApp();
+  const { materials, addMaterial, updateMaterial, deleteMaterial, selectedProjectId, selectedProject } = useApp();
+  const { userProfile } = useAuth();
+  const { canAction } = useMenuPermissions();
 
   const [search,       setSearch]       = useState('');
   const [filterResult, setFilterResult] = useState('');
@@ -53,7 +57,9 @@ export default function MaterialsPage() {
   const [editTarget,   setEditTarget]   = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
 
-  const canEdit = currentUser.role === 'QcDocCenter';
+  const canAddMaterial    = canAction('materials', 'addMaterial');
+  const canEditMaterial   = canAction('materials', 'editMaterial');
+  const canDeleteMaterial = canAction('materials', 'deleteMaterial');
 
   const projectItems = materials.filter(m => m.projectId === selectedProjectId);
 
@@ -95,7 +101,7 @@ export default function MaterialsPage() {
           <h1 className="text-xl font-bold text-slate-800">Material Receive</h1>
           <p className="text-sm text-slate-500 mt-0.5">{selectedProject?.name} — Material Approval Records</p>
         </div>
-        {canEdit && (
+        {canAddMaterial && (
           <button
             onClick={() => setModalMode('add')}
             className="flex items-center gap-2 px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white text-xs font-semibold rounded-lg transition-colors shadow-sm"
@@ -165,7 +171,7 @@ export default function MaterialsPage() {
           <table className="w-full text-xs">
             <thead>
               <tr className="bg-slate-800 text-white">
-                {['#', 'Mat. Rev. No.', 'Receive Date', 'Category', 'Description', 'Supplier', 'Qty / Unit', 'Spec / Package', 'Test Doc', 'Result', 'Note', canEdit ? 'Actions' : ''].filter(Boolean).map(h => (
+                {['#', 'Mat. Rev. No.', 'Receive Date', 'Category', 'Description', 'Supplier', 'Qty / Unit', 'Spec / Package', 'Test Doc', 'Result', 'Note', (canEditMaterial || canDeleteMaterial) ? 'Actions' : ''].filter(Boolean).map(h => (
                   <th key={h} className="px-4 py-3 text-left font-semibold whitespace-nowrap text-[11px] tracking-wide">{h}</th>
                 ))}
               </tr>
@@ -219,21 +225,25 @@ export default function MaterialsPage() {
                   <td className="px-4 py-3 text-slate-500 max-w-[200px]">
                     <div className="text-[11px] truncate" title={item.noteOfTest}>{item.noteOfTest || '—'}</div>
                   </td>
-                  {canEdit && (
+                  {(canEditMaterial || canDeleteMaterial) && (
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button
-                          onClick={() => { setEditTarget(item); setModalMode('edit'); }}
-                          className="w-7 h-7 rounded-lg bg-blue-50 hover:bg-blue-100 flex items-center justify-center transition-colors"
-                        >
-                          <Pencil size={12} className="text-blue-600" />
-                        </button>
-                        <button
-                          onClick={() => setDeleteTarget(item)}
-                          className="w-7 h-7 rounded-lg bg-red-50 hover:bg-red-100 flex items-center justify-center transition-colors"
-                        >
-                          <Trash2 size={12} className="text-red-500" />
-                        </button>
+                        {canEditMaterial && (
+                          <button
+                            onClick={() => { setEditTarget(item); setModalMode('edit'); }}
+                            className="w-7 h-7 rounded-lg bg-blue-50 hover:bg-blue-100 flex items-center justify-center transition-colors"
+                          >
+                            <Pencil size={12} className="text-blue-600" />
+                          </button>
+                        )}
+                        {canDeleteMaterial && (
+                          <button
+                            onClick={() => setDeleteTarget(item)}
+                            className="w-7 h-7 rounded-lg bg-red-50 hover:bg-red-100 flex items-center justify-center transition-colors"
+                          >
+                            <Trash2 size={12} className="text-red-500" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   )}
