@@ -1,5 +1,15 @@
 {
   "projects": {
     "default": "cmg-event-managment"
-  }
+  },
+  "targets": {
+    "cmg-event-managment": {
+      "hosting": {
+        "site-01": [
+          "cmg-qc-system"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }
