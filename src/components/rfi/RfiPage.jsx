@@ -117,57 +117,59 @@ const STAGE_ADVANCE = {
 function RfiCard({ rfi, stage, canAdvance, canEdit, canDelete, onView, onEdit, onAdvance, onDelete }) {
   const isCurrentStage = rfi.stage === stage.id;
   const isDone         = rfi.stage > stage.id;
+  const isOverdue      = rfi.dueDate && rfi.stage < 4 && new Date(rfi.dueDate) < new Date();
 
   const result = stage.id === 1 ? rfi.statusInsp
-               : stage.id === 2 ? (rfi.inspectionScheduleDate ? 'Scheduled' : 'Issued')
                : stage.id === 3 ? rfi.result
-               : rfi.stage4Status;
+               : stage.id === 4 ? rfi.stage4Status
+               : null;
 
   const advanceCfg = STAGE_ADVANCE[rfi.stage];
 
+  const stage2Line = stage.id === 2
+    ? [
+        rfi.inspectionScheduleDate ? `${rfi.inspectionScheduleDate}${rfi.inspectionScheduleTime ? ' ' + rfi.inspectionScheduleTime : ''}` : null,
+        rfi.stage2EmailStatus === 'ok' ? 'Send Email OK' : null,
+      ].filter(Boolean).join(' · ')
+    : null;
+
   return (
     <div
-      className={`rounded-xl border shadow-sm p-3.5 transition-all hover:shadow-md cursor-pointer group
+      className={`rounded-lg border shadow-sm p-2.5 transition-all hover:shadow-md cursor-pointer group
         ${isDone        ? 'bg-white border-slate-100 opacity-60' :
           isCurrentStage ? `bg-white ${stage.border} shadow-sm` :
           'bg-white border-slate-100 opacity-40 pointer-events-none'}`}
       onClick={() => onView(rfi)}
     >
-      {/* Top row */}
-      <div className="flex items-start justify-between gap-2 mb-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${isDone ? 'bg-green-400' : stage.dot}`} />
-          <span className="text-[11px] font-bold text-slate-700 font-mono truncate">{rfi.rfiNo}</span>
+      {/* Top row: stage badge + RFI No. + Request No. */}
+      <div className="flex items-center justify-between gap-1.5 mb-1">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${stage.badge}`}>S{rfi.stage}</span>
+          <span className="text-[11px] font-bold text-slate-800 font-mono truncate">{rfi.requestNo}</span>
+          {rfi.rfiNo && rfi.rfiNo !== '-' && (
+            <span className="text-[10px] text-slate-500 truncate">— {rfi.rfiNo}</span>
+          )}
         </div>
-        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${stage.badge}`}>
-          S{rfi.stage}
-        </span>
+        <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${isDone ? 'bg-green-400' : stage.dot}`} />
       </div>
 
-      {/* Type & area */}
-      <div className="mb-2">
-        <div className="text-xs font-semibold text-slate-800 truncate">{rfi.typeOfInspection}</div>
-        <div className="text-[11px] text-slate-500 truncate">{rfi.area} · {rfi.location}</div>
-      </div>
+      {/* Type of inspection */}
+      <div className="text-[10px] font-semibold text-slate-700 truncate mb-0.5">{rfi.typeOfInspection}</div>
 
-      {/* Stage-specific context snippet */}
-      {stage.id === 2 && rfi.inspectionScheduleDate && (
-        <div className="text-[10px] text-blue-600 bg-blue-50 rounded px-2 py-1 mb-2">
-          📅 {rfi.inspectionScheduleDate} {rfi.inspectionScheduleTime}
-        </div>
-      )}
-      {stage.id === 2 && rfi.stage2EmailStatus === 'ok' && (
-        <div className="text-[10px] font-semibold text-green-700 bg-green-50 border border-green-100 rounded px-2 py-1 mb-2">
-          ➜ Send Email OK
-        </div>
+      {/* Area · Location */}
+      <div className="text-[9px] text-slate-400 truncate mb-1">{rfi.area} · {rfi.location}</div>
+
+      {/* Stage-specific chips */}
+      {stage2Line && (
+        <div className="text-[9px] text-blue-600 bg-blue-50 rounded px-1.5 py-0.5 mb-1 truncate">{stage2Line}</div>
       )}
       {stage.id === 3 && rfi.result && (
-        <div className={`text-[10px] font-semibold rounded px-2 py-1 mb-2 ${RESULT_COLORS[rfi.result] || 'bg-slate-100 text-slate-500'}`}>
+        <div className={`text-[9px] font-semibold rounded px-1.5 py-0.5 mb-1 truncate ${RESULT_COLORS[rfi.result] || 'bg-slate-100 text-slate-500'}`}>
           Onsite: {rfi.result}
         </div>
       )}
       {stage.id === 4 && rfi.stage4Status && (
-        <div className={`text-[10px] font-semibold rounded px-2 py-1 mb-2 ${
+        <div className={`text-[9px] font-semibold rounded px-1.5 py-0.5 mb-1 truncate ${
           rfi.stage4Status === 'Close' ? 'bg-green-100 text-green-700' :
           rfi.stage4Status === 'Complete document' ? 'bg-blue-100 text-blue-700' :
           'bg-amber-100 text-amber-700'}`}>
@@ -175,52 +177,37 @@ function RfiCard({ rfi, stage, canAdvance, canEdit, canDelete, onView, onEdit, o
         </div>
       )}
 
-      {/* Meta row */}
-      <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-slate-100">
-        <div className="flex items-center gap-1.5">
+      {/* Meta row: result badge + actions */}
+      <div className="flex items-center justify-between gap-1.5 pt-1 border-t border-slate-100 mt-1">
+        <div className="flex items-center gap-1">
           {result && (
-            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${RESULT_COLORS[result] || 'bg-slate-100 text-slate-500'}`}>
+            <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${RESULT_COLORS[result] || 'bg-slate-100 text-slate-500'}`}>
               {result}
-            </span>
-          )}
-          {rfi.dueDate && (
-            <span className="flex items-center gap-1 text-[10px] text-slate-400">
-              <Clock size={9} /> {rfi.dueDate}
             </span>
           )}
         </div>
 
-        {/* Actions — only on current stage card, role-gated */}
         {isCurrentStage && (canAdvance || canEdit || canDelete) && (
           <div
-            className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
+            className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
             onClick={e => e.stopPropagation()}
           >
             {canEdit && (
-              <button
-                onClick={() => onEdit(rfi)}
-                className="w-6 h-6 rounded bg-slate-100 hover:bg-blue-100 flex items-center justify-center transition-colors"
-                title="Edit"
-              >
-                <Pencil size={10} className="text-slate-600" />
+              <button onClick={() => onEdit(rfi)}
+                className="w-5 h-5 rounded bg-slate-100 hover:bg-blue-100 flex items-center justify-center transition-colors">
+                <Pencil size={9} className="text-slate-600" />
               </button>
             )}
             {canDelete && (
-              <button
-                onClick={() => onDelete(rfi)}
-                className="w-6 h-6 rounded bg-slate-100 hover:bg-red-100 flex items-center justify-center transition-colors"
-                title="Delete RFI"
-              >
-                <Trash2 size={10} className="text-slate-500 hover:text-red-600" />
+              <button onClick={() => onDelete(rfi)}
+                className="w-5 h-5 rounded bg-slate-100 hover:bg-red-100 flex items-center justify-center transition-colors">
+                <Trash2 size={9} className="text-slate-500 hover:text-red-600" />
               </button>
             )}
             {canAdvance && rfi.stage < 4 && advanceCfg && (
-              <button
-                onClick={() => onAdvance(rfi)}
-                className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold text-white transition-colors ${advanceCfg.color} hover:opacity-90`}
-                title={`Advance to Stage ${rfi.stage + 1}`}
-              >
-                <ArrowRight size={10} />
+              <button onClick={() => onAdvance(rfi)}
+                className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold text-white ${advanceCfg.color} hover:opacity-90`}>
+                <ArrowRight size={9} />
                 {advanceCfg.label}
               </button>
             )}
@@ -228,10 +215,11 @@ function RfiCard({ rfi, stage, canAdvance, canEdit, canDelete, onView, onEdit, o
         )}
       </div>
 
-      {/* Overdue warning */}
-      {rfi.dueDate && rfi.stage < 4 && new Date(rfi.dueDate) < new Date() && (
-        <div className="mt-2 text-[10px] text-red-500 font-semibold flex items-center gap-1">
-          <AlertTriangle size={9} /> Overdue
+      {/* Due date + overdue — bottom row */}
+      {rfi.dueDate && (
+        <div className={`flex items-center gap-1 mt-1 text-[9px] ${isOverdue ? 'text-red-500 font-semibold' : 'text-slate-400'}`}>
+          <Clock size={8} /> {rfi.dueDate}
+          {isOverdue && <><AlertTriangle size={8} className="ml-0.5" /> Overdue</>}
         </div>
       )}
     </div>

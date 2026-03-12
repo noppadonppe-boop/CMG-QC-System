@@ -99,7 +99,10 @@ export async function loginWithGoogle() {
       logActivity('LOGIN', user.uid, { method: 'google' });
       return existing;
     }
-    const created = await createUserProfile(user, { role: ['Staff'], status: 'pending' });
+    const nameParts = (user.displayName || '').trim().split(/\s+/);
+    const firstName = nameParts[0] || '';
+    const lastName  = nameParts.slice(1).join(' ') || '';
+    const created = await createUserProfile(user, { role: ['Staff'], status: 'pending', firstName, lastName });
     logActivity('REGISTER', user.uid, { method: 'google' });
     return created;
   } catch (err) {

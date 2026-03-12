@@ -209,6 +209,7 @@ export default function RfiStage1Modal({ rfi, onSave, onClose }) {
       rfiNo: canEditRfiNo ? '' : '-',
       dueDate: todayIso(),
       requestedBy: displayName,
+      inspectedBy: displayName,
     };
   });
   const [referDrawingFiles, setReferDrawingFiles] = useState(
@@ -397,19 +398,7 @@ export default function RfiStage1Modal({ rfi, onSave, onClose }) {
             <div className="w-5 h-5 rounded-full bg-orange-500 text-white flex items-center justify-center text-[10px] font-bold shrink-0">1</div>
             <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Identification</h3>
           </div>
-          <FormGrid cols={4}>
-            <FormField label="Request No." required>
-              <div className="relative">
-                <Input
-                  value={form.requestNo}
-                  readOnly
-                  className="bg-slate-50 text-slate-600 cursor-not-allowed pr-10"
-                />
-                {!isEdit && (
-                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-orange-500 font-semibold">AUTO</span>
-                )}
-              </div>
-            </FormField>
+          <FormGrid cols={3}>
             <FormField label="RFI No." required>
               {canEditRfiNo ? (
                 <Input value={form.rfiNo} onChange={set('rfiNo')} placeholder="RFI-2024-001" required />

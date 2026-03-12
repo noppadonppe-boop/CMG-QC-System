@@ -161,16 +161,27 @@ export default function RfiDetailModal({ rfi, onClose }) {
                 </button>
               )}
             </div>
-            <Field label="Issue Date"             value={rfi.issueDate} />
-            <Field label="Inspection Package"     value={rfi.inspectionPackage} />
+            <Field label="Work Step"              value={rfi.inspectionPackage} />
             <Field label="Schedule Date"          value={rfi.inspectionScheduleDate} />
             <Field label="Schedule Time"          value={rfi.inspectionScheduleTime} />
             <div className="col-span-3">
-              <Field label="Description of Inspection" value={rfi.descriptionOfInspection} />
+              <Field label="Inspection Scope" value={rfi.descriptionOfInspection} />
             </div>
             <div className="col-span-3">
               <Field label="Note" value={rfi.stage2Note} />
             </div>
+            {Array.isArray(rfi.stage2Files) && rfi.stage2Files.length > 0 && (
+              <div className="col-span-3">
+                <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Stage 2 Upload Files</div>
+                <div className="flex flex-wrap gap-2">
+                  {rfi.stage2Files.map((f, i) => (
+                    <a key={i} href={f.url} target="_blank" rel="noopener noreferrer"
+                      className="text-[11px] px-2 py-1 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 hover:border-blue-400 hover:underline truncate max-w-[200px]"
+                      title={f.name}>{f.name}</a>
+                  ))}
+                </div>
+              </div>
+            )}
           </Section>
         )}
 
@@ -181,6 +192,25 @@ export default function RfiDetailModal({ rfi, onClose }) {
             <div className="col-span-3">
               <Field label="Note" value={rfi.stage3Note} />
             </div>
+            {rfi.stage3Attachment && (
+              <div className="col-span-3">
+                <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Stage 3 Attachment (URL)</div>
+                <a href={rfi.stage3Attachment} target="_blank" rel="noopener noreferrer"
+                  className="text-[11px] text-purple-600 hover:underline break-all">{rfi.stage3Attachment}</a>
+              </div>
+            )}
+            {Array.isArray(rfi.stage3InspectorFiles) && rfi.stage3InspectorFiles.length > 0 && (
+              <div className="col-span-3">
+                <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Stage 3 Inspector Files</div>
+                <div className="flex flex-wrap gap-2">
+                  {rfi.stage3InspectorFiles.map((f, i) => (
+                    <a key={i} href={f.url} target="_blank" rel="noopener noreferrer"
+                      className="text-[11px] px-2 py-1 rounded-lg bg-purple-50 border border-purple-200 text-purple-700 hover:border-purple-400 hover:underline truncate max-w-[200px]"
+                      title={f.name}>{f.name}</a>
+                  ))}
+                </div>
+              </div>
+            )}
           </Section>
         )}
 
@@ -191,6 +221,37 @@ export default function RfiDetailModal({ rfi, onClose }) {
             <div className="col-span-3">
               <Field label="Note" value={rfi.stage4Note} />
             </div>
+            {rfi.stage4Attachment && (
+              <div className="col-span-3">
+                <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Stage 4 Attachment (URL)</div>
+                <a href={rfi.stage4Attachment} target="_blank" rel="noopener noreferrer"
+                  className="text-[11px] text-green-700 hover:underline break-all">{rfi.stage4Attachment}</a>
+              </div>
+            )}
+            {Array.isArray(rfi.stage4ClientSignFiles) && rfi.stage4ClientSignFiles.length > 0 && (
+              <div className="col-span-3">
+                <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Stage 4 Client Sign Files</div>
+                <div className="flex flex-wrap gap-2">
+                  {rfi.stage4ClientSignFiles.map((f, i) => (
+                    <a key={i} href={f.url} target="_blank" rel="noopener noreferrer"
+                      className="text-[11px] px-2 py-1 rounded-lg bg-teal-50 border border-teal-200 text-teal-700 hover:border-teal-400 hover:underline truncate max-w-[200px]"
+                      title={f.name}>{f.name}</a>
+                  ))}
+                </div>
+              </div>
+            )}
+            {Array.isArray(rfi.stage4CompleteFiles) && rfi.stage4CompleteFiles.length > 0 && (
+              <div className="col-span-3">
+                <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Stage 4 Complete Document Files</div>
+                <div className="flex flex-wrap gap-2">
+                  {rfi.stage4CompleteFiles.map((f, i) => (
+                    <a key={i} href={f.url} target="_blank" rel="noopener noreferrer"
+                      className="text-[11px] px-2 py-1 rounded-lg bg-green-50 border border-green-200 text-green-700 hover:border-green-400 hover:underline truncate max-w-[200px]"
+                      title={f.name}>{f.name}</a>
+                  ))}
+                </div>
+              </div>
+            )}
           </Section>
         )}
 

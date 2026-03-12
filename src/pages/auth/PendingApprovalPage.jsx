@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { HardHat, Clock, LogOut, RefreshCw } from 'lucide-react';
 import { logout } from '../../auth/firebaseAuth';
 import { useAuth } from '../../auth/AuthContext';
@@ -6,16 +7,28 @@ import { useNavigate } from 'react-router-dom';
 export default function PendingApprovalPage() {
   const { userProfile, refreshProfile } = useAuth();
   const navigate = useNavigate();
+  const [checking, setChecking]     = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  useEffect(() => {
+    if (!userProfile) {
+      navigate('/login', { replace: true });
+    } else if (userProfile.status === 'approved') {
+      navigate('/', { replace: true });
+    }
+  }, [userProfile, navigate]);
 
   async function handleLogout() {
+    setLoggingOut(true);
     await logout();
     navigate('/login', { replace: true });
   }
 
   async function handleCheckStatus() {
-    // ดึงโปรไฟล์ล่าสุด จากนั้นส่งผู้ใช้กลับเข้า flow ปกติ
+    setChecking(true);
     await refreshProfile();
-    navigate('/', { replace: true });
+    setChecking(false);
+    // navigate is handled by the useEffect above if status changed
   }
 
   return (
@@ -60,17 +73,19 @@ export default function PendingApprovalPage() {
           <div className="flex gap-3">
             <button
               onClick={handleCheckStatus}
-              className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm font-medium text-slate-200 transition-colors"
+              disabled={checking || loggingOut}
+              className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-60 disabled:cursor-not-allowed rounded-lg text-sm font-medium text-slate-200 transition-colors"
             >
-              <RefreshCw size={14} />
-              ตรวจสอบสถานะ
+              <RefreshCw size={14} className={checking ? 'animate-spin' : ''} />
+              {checking ? 'กำลังตรวจสอบ...' : 'ตรวจสอบสถานะ'}
             </button>
             <button
               onClick={handleLogout}
-              className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 rounded-lg text-sm font-medium text-red-400 transition-colors"
+              disabled={loggingOut || checking}
+              className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-red-500/10 hover:bg-red-500/20 disabled:opacity-60 disabled:cursor-not-allowed border border-red-500/30 rounded-lg text-sm font-medium text-red-400 transition-colors"
             >
-              <LogOut size={14} />
-              ออกจากระบบ
+              <LogOut size={14} className={loggingOut ? 'animate-pulse' : ''} />
+              {loggingOut ? 'กำลังออก...' : 'ออกจากระบบ'}
             </button>
           </div>
         </div>
