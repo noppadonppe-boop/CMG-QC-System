@@ -5,7 +5,7 @@ import { doc, onSnapshot } from 'firebase/firestore';
 import { auth, fetchUserProfile, logout, updateUserProfileDoc } from './firebaseAuth';
 import { db } from '../config/firebase';
 import { APP_NAME } from './constants';
-import { isSessionExpired, clearSession, getRemainingMinutes } from './session';
+import { clearSession, getRemainingMinutes } from './session';
 
 // Retry helper: ดึง profile ซ้ำสูงสุด N ครั้ง รอ delay ms ต่อรอบ
 // (ป้องกัน race condition: onAuthStateChanged ยิงก่อน createUserProfile เสร็จ)
@@ -65,15 +65,7 @@ export function AuthProvider({ children }) {
         return;
       }
 
-      if (isSessionExpired()) {
-        clearSession();
-        // Sign out from Firebase so firebaseUser is cleared (prevents infinite spinner)
-        logout().catch(() => {});
-        setFirebaseUser(null);
-        setUserProfile(null);
-        setLoading(false);
-        return;
-      }
+      // ไม่เช็ค session หมดอายุ — ใช้แค่ Firebase Auth (logout เมื่อ Firebase sign out / token หมดอายุ / Admin ลบ profile)
 
       // useRetry=true: รอ createUserProfile เสร็จก่อน (กรณี Google new user)
       await loadProfile(user, true);
@@ -111,11 +103,9 @@ export function AuthProvider({ children }) {
     return () => unsub();
   }, [firebaseUser?.uid]);
 
-  // Countdown every 60s
+  // ไม่นับถอยหลังเซสชัน (ไม่จำกัดเวลา)
   useEffect(() => {
     setSessionMinutesLeft(getRemainingMinutes());
-    const id = setInterval(() => setSessionMinutesLeft(getRemainingMinutes()), 60_000);
-    return () => clearInterval(id);
   }, []);
 
   return (

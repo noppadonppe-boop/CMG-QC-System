@@ -156,6 +156,11 @@ function RfiCard({ rfi, stage, canAdvance, canEdit, canDelete, onView, onEdit, o
           📅 {rfi.inspectionScheduleDate} {rfi.inspectionScheduleTime}
         </div>
       )}
+      {stage.id === 2 && rfi.stage2EmailStatus === 'ok' && (
+        <div className="text-[10px] font-semibold text-green-700 bg-green-50 border border-green-100 rounded px-2 py-1 mb-2">
+          ➜ Send Email OK
+        </div>
+      )}
       {stage.id === 3 && rfi.result && (
         <div className={`text-[10px] font-semibold rounded px-2 py-1 mb-2 ${RESULT_COLORS[rfi.result] || 'bg-slate-100 text-slate-500'}`}>
           Onsite: {rfi.result}
@@ -291,17 +296,38 @@ export default function RfiPage() {
   const { userProfile } = useAuth();
   const { canAction } = useMenuPermissions();
 
-  const canCreateRfi  = canAction('rfi', 'createRfi');
-  const canAdvanceRfi = canAction('rfi', 'advanceRfi');
-  const canEditRfi    = canAction('rfi', 'editRfi');
-  const canDeleteRfi  = canAction('rfi', 'deleteRfi');
+  const canCreateRfi       = canAction('rfi', 'createRfi');
+  const canAdvanceRfiStage2 = canAction('rfi', 'advanceRfiStage2');
+  const canAdvanceRfiStage3 = canAction('rfi', 'advanceRfiStage3');
+  const canAdvanceRfiStage4 = canAction('rfi', 'advanceRfiStage4');
+  const canEditRfi          = canAction('rfi', 'editRfi');
+  const canEditRfiStage2    = canAction('rfi', 'editRfiStage2');
+  const canEditRfiStage3    = canAction('rfi', 'editRfiStage3');
+  const canEditRfiStage4    = canAction('rfi', 'editRfiStage4');
+  const canDeleteRfi        = canAction('rfi', 'deleteRfi');
+
+  function canAdvanceForRfi(rfi) {
+    const stage = rfi.stage;
+    if (stage === 1) return canAdvanceRfiStage2;
+    if (stage === 2) return canAdvanceRfiStage3 && rfi.stage2EmailStatus === 'ok';
+    if (stage === 3) return canAdvanceRfiStage4;
+    return false;
+  }
+
+  function canEditForStage(stage) {
+    if (stage === 1) return canEditRfi;
+    if (stage === 2) return canEditRfiStage2;
+    if (stage === 3) return canEditRfiStage3;
+    if (stage === 4) return canEditRfiStage4;
+    return false;
+  }
 
   // Per-card permission resolver — ใช้ Set Role เป็นหลัก
   function getCardPerms(rfi) {
     const s = rfi.stage;
     return {
-      canAdvance: canAdvanceRfi,
-      canEdit:    canEditRfi && s === 1,
+      canAdvance: canAdvanceForRfi(rfi),
+      canEdit:    canEditForStage(s),
       canDelete:  canDeleteRfi,
     };
   }
@@ -358,7 +384,7 @@ export default function RfiPage() {
 
   // Advance button dispatcher — opens the correct modal for the next stage
   function handleAdvance(rfi) {
-    if (!canAdvanceRfi) return;
+    if (!canAdvanceForRfi(rfi)) return;
     if (rfi.stage === 1) { setStage2Modal(rfi); return; }
     if (rfi.stage === 2) { setStage3Modal(rfi); return; }
     if (rfi.stage === 3) { setStage4Modal(rfi); return; }
@@ -391,7 +417,11 @@ export default function RfiPage() {
   }
 
   function openEdit(rfi) {
-    if (rfi.stage === 1 && canEditRfi) setEditTarget(rfi);
+    if (!canEditForStage(rfi.stage)) return;
+    if (rfi.stage === 1) setEditTarget(rfi);
+    if (rfi.stage === 2) setStage2Modal(rfi);
+    if (rfi.stage === 3) setStage3Modal(rfi);
+    if (rfi.stage === 4) setStage4Modal(rfi);
   }
 
   function handleDelete(rfi) {
@@ -467,7 +497,7 @@ export default function RfiPage() {
       </div>
 
       {/* Notice for read-only */}
-      {!canCreateRfi && !canAdvanceRfi && !canEditRfi && !canDeleteRfi && (
+      {!canCreateRfi && !canAdvanceRfiStage2 && !canAdvanceRfiStage3 && !canAdvanceRfiStage4 && !canEditRfi && !canEditRfiStage2 && !canEditRfiStage3 && !canEditRfiStage4 && !canDeleteRfi && (
         <div className="flex items-center gap-3 px-4 py-3 rounded-xl border text-xs font-medium bg-slate-50 border-slate-200 text-slate-600">
           <ClipboardCheck size={15} />
           You have read-only access to RFI records.

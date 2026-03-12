@@ -26,15 +26,23 @@ function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }
 
-/** Generate next CMG-YYYY-TR-XXX number for the project */
-export function generateTransmittalNo(projectDocs) {
-  const year   = new Date().getFullYear();
-  const prefix = `CMG-${year}-TR-`;
-  const nums   = projectDocs
-    .map(d => parseInt((d.transmittalNo ?? '').replace(prefix, ''), 10))
+/**
+ * Generate next Transmittal No. in format TR-{ProjectNoNoHyphen}-0001
+ * e.g. Project No. J-74 → TR-J74-0001; CMG-2024-001 → TR-CMG2024001-0001
+ */
+export function generateTransmittalNo(projectNo, projectDocs) {
+  if (!projectNo?.trim()) return '';
+  const projectKey = projectNo.replace(/-/g, '');
+  const prefix = `TR-${projectKey}-`;
+  const nums = (projectDocs || [])
+    .map(d => {
+      const no = d.transmittalNo ?? '';
+      if (!no.startsWith(prefix)) return NaN;
+      return parseInt(no.slice(prefix.length), 10);
+    })
     .filter(n => !isNaN(n));
   const next = nums.length ? Math.max(...nums) + 1 : 1;
-  return `${prefix}${String(next).padStart(3, '0')}`;
+  return `${prefix}${String(next).padStart(4, '0')}`;
 }
 
 function fileIcon(name = '') {
@@ -186,8 +194,8 @@ export default function QcDocModal({ doc, onSave, onClose, projectDocs = [], isD
   const { selectedProjectId, projects } = useApp();
   const selectedProject = projects.find(p => p.id === selectedProjectId);
 
-  // Generate TR number for new/duplicate
-  const autoTrNo = generateTransmittalNo(projectDocs);
+  // Generate TR number for new/duplicate: TR-{ProjectNo ไม่มี -}-0001
+  const autoTrNo = generateTransmittalNo(selectedProject?.projectNo ?? '', projectDocs);
 
   function initForm() {
     if (doc) {
@@ -196,11 +204,14 @@ export default function QcDocModal({ doc, onSave, onClose, projectDocs = [], isD
         ...doc,
         attachments:    Array.isArray(doc.attachments)    ? doc.attachments    : [],
         docTitleFiles:  Array.isArray(doc.docTitleFiles)  ? doc.docTitleFiles  : [],
+        isExternal:     typeof doc.isExternal === 'boolean' ? doc.isExternal : false,
       };
     }
     // Add / Duplicate
     const base = isDuplicate && doc ? { ...doc } : {};
     return {
+      transmittalNoRef: base.transmittalNoRef ?? '',
+      isExternal:     typeof base.isExternal === 'boolean' ? base.isExternal : false,
       from:           base.from           ?? '',
       transmittalNo:  autoTrNo,
       transmittalDate: todayIso(),
@@ -213,7 +224,7 @@ export default function QcDocModal({ doc, onSave, onClose, projectDocs = [], isD
       status:         base.status         ?? 'For Review',
       attachments:    [],
       docTitleFiles:  [],
-      projectNo:      selectedProject?.projectNo ?? '',
+      projectNo:      selectedProject?.projectNo ?? '', // ใช้โปรเจกต์ที่เลือกไว้ด้านบน
     };
   }
 
@@ -234,58 +245,101 @@ export default function QcDocModal({ doc, onSave, onClose, projectDocs = [], isD
 
   async function handleSubmit(e) {
     e.preventDefault();
+    if (submitting) return;
     if (!form.rev?.trim()) {
       alert('กรุณากรอก Rev.');
       return;
+    }
+    if (!selectedProjectId || !selectedProject) {
+      alert('ไม่พบโปรเจกต์ที่เลือก — กรุณาเลือกโปรเจกต์จากเมนูด้านบนก่อน');
+      return;
+    }
+    // ป้องกันข้อมูลซ้ำ: ถ้าเป็นโหมด Add/Duplicate ให้ตรวจว่า Transmittal No. ยังไม่มีในรายการ
+    if (!isEdit) {
+      const exists = projectDocs.some(d => (d.transmittalNo || '').trim() === (trNo || '').trim());
+      if (exists) {
+        alert(`Transmittal No. "${trNo}" มีในระบบแล้ว (อาจมีผู้บันทึกพร้อมกัน)\nกรุณาปิดหน้าต่างนี้แล้วกด Add Transmittal ใหม่เพื่อได้เลขล่าสุด`);
+        return;
+      }
     }
     setSubmitting(true);
     try {
       onSave({
         ...form,
         transmittalNo: trNo,
-        projectId:      selectedProjectId,
+        projectId:    selectedProjectId,
+        projectNo:    selectedProject.projectNo,
         attachments,
         docTitleFiles,
-        // keep drawingLink for backward compat with old records
-        drawingLink:    attachments[0]?.url ?? form.drawingLink ?? '',
+        drawingLink:  attachments[0]?.url ?? form.drawingLink ?? '',
       });
     } finally {
       setSubmitting(false);
     }
   }
 
+  const headerTitle = isEdit ? 'Edit Transmittal' : isDuplicate ? 'Duplicate' : 'Add Transmittal / Drawing';
+
   return (
     <Modal
-      title={isEdit ? `Edit Transmittal — ${form.transmittalNo}` : isDuplicate ? `Duplicate — ${trNo}` : 'Add Transmittal / Drawing'}
+      title={
+        <div className="flex flex-col gap-1">
+          <h2 className="text-sm font-bold text-slate-800">{headerTitle}</h2>
+          <span className="text-xl font-bold text-blue-600 tracking-tight">{trNo}</span>
+          {!isEdit && (
+            <span className="text-[10px] text-orange-500 font-semibold">AUTO</span>
+          )}
+        </div>
+      }
       onClose={onClose}
       size="lg"
     >
       <form onSubmit={handleSubmit} className="space-y-5">
 
-        {/* Row 1: Project, TR No (auto/readonly), Date, From */}
-        <FormGrid cols={4}>
-          <FormField label="Project No." required>
-            <Select value={form.projectNo || ''} onChange={setField('projectNo')} required>
-              <option value="" disabled>Select project…</option>
-              {projects.map(p => (
-                <option key={p.id} value={p.projectNo}>
-                  {p.projectNo} — {p.name}
-                </option>
-              ))}
-            </Select>
-          </FormField>
+        {/* โปรเจกต์ใช้ค่าจาก Dropdown ด้านบน (ไม่ให้เลือกในฟอร์ม) */}
+        {selectedProject && (
+          <p className="text-[11px] text-slate-500">
+            โปรเจกต์: <span className="font-semibold text-slate-700">{selectedProject.projectNo} — {selectedProject.name}</span>
+          </p>
+        )}
 
-          <FormField label="Transmittal No." required>
-            <div className="relative">
-              <Input
-                value={trNo}
-                readOnly
-                className="bg-slate-50 text-slate-500 cursor-not-allowed pr-8"
+        {/* Row 1: Transmittal No Ref */}
+        <FormField label="Transmittal No Ref.">
+          <Input
+            value={form.transmittalNoRef || ''}
+            onChange={setField('transmittalNoRef')}
+            placeholder="อ้างอิงเลข Transmittal เดิม (ถ้ามี)"
+          />
+        </FormField>
+
+        {/* Type: Internal / External */}
+        <FormField label="Type">
+          <div className="flex items-center gap-4 mt-1.5">
+            <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-700">
+              <input
+                type="radio"
+                name="docType"
+                checked={form.isExternal === false}
+                onChange={() => setForm(f => ({ ...f, isExternal: false }))}
+                className="accent-orange-500"
               />
-              <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-orange-400 font-semibold">AUTO</span>
-            </div>
-          </FormField>
+              Internal
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-700">
+              <input
+                type="radio"
+                name="docType"
+                checked={form.isExternal === true}
+                onChange={() => setForm(f => ({ ...f, isExternal: true }))}
+                className="accent-orange-500"
+              />
+              External
+            </label>
+          </div>
+        </FormField>
 
+        {/* Row 2: Transmittal Date, From */}
+        <FormGrid cols={2}>
           <FormField label="Transmittal Date" required>
             <Input
               type="date"
@@ -300,7 +354,7 @@ export default function QcDocModal({ doc, onSave, onClose, projectDocs = [], isD
           </FormField>
         </FormGrid>
 
-        {/* Row 2: Document No, Rev (required), Receive Date */}
+        {/* Row 3: Document No, Rev (required), Receive Date */}
         <FormGrid cols={4}>
           <FormField label="Document No." required className="col-span-2">
             <Input value={form.documentNo} onChange={setField('documentNo')} placeholder="S-DWG-001" required />

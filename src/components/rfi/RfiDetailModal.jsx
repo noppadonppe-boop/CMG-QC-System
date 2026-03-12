@@ -1,4 +1,6 @@
 import Modal from '../common/Modal';
+import { FileText, Image, FileSpreadsheet, Send, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { useApp } from '../../context/AppContext';
 
 function Field({ label, value }) {
   if (!value && value !== 0) return null;
@@ -7,6 +9,34 @@ function Field({ label, value }) {
       <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">{label}</span>
       <span className="text-xs text-slate-800 font-medium">{value}</span>
     </div>
+  );
+}
+
+function referDrawingFileType(name = '') {
+  const ext = name.split('.').pop()?.toLowerCase();
+  if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) return 'image';
+  if (['xls', 'xlsx'].includes(ext)) return 'excel';
+  return 'pdf';
+}
+
+function ReferDrawingThumb({ file }) {
+  const type = referDrawingFileType(file.name);
+  return (
+    <a
+      href={file.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="flex flex-col items-center gap-1 p-2 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 hover:border-orange-300 transition-colors w-24 shrink-0"
+    >
+      {type === 'image' ? (
+        <img src={file.url} alt="" className="w-14 h-14 object-cover rounded border border-slate-200" />
+      ) : (
+        <div className="w-14 h-14 rounded border border-slate-200 bg-white flex items-center justify-center">
+          {type === 'excel' ? <FileSpreadsheet size={24} className="text-emerald-600" /> : <FileText size={24} className="text-orange-500" />}
+        </div>
+      )}
+      <span className="text-[10px] text-slate-600 truncate w-full text-center" title={file.name}>{file.name}</span>
+    </a>
   );
 }
 
@@ -28,6 +58,16 @@ const STAGE_LABELS = ['', 'Create Request', 'Issue to Client', 'Onsite Inspectio
 const STAGE_COLORS = ['', 'bg-orange-500', 'bg-blue-500', 'bg-purple-500', 'bg-green-500'];
 
 export default function RfiDetailModal({ rfi, onClose }) {
+  const { updateRfi } = useApp();
+  const emailOk = rfi.stage2EmailStatus === 'ok';
+
+  function markEmailSent() {
+    updateRfi(rfi.id, {
+      stage2EmailStatus: 'ok',
+      stage2EmailSentAt: new Date().toISOString(),
+    });
+  }
+
   return (
     <Modal title={`RFI Detail — ${rfi.rfiNo}`} onClose={onClose} size="xl">
       {/* Stage Progress Bar */}
@@ -70,10 +110,22 @@ export default function RfiDetailModal({ rfi, onClose }) {
           <Field label="Due Date"         value={rfi.dueDate} />
           <Field label="Request Date (Owner)"     value={rfi.requestDateOwner} />
           <Field label="Request Time (Owner)"     value={rfi.requestTimeOwner} />
-          <Field label="Refer Drawing"    value={rfi.referDrawing} />
+          <div className="col-span-3">
+            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block mb-1">Refer Drawing , Markup Drawing</span>
+            {Array.isArray(rfi.referDrawingFiles) && rfi.referDrawingFiles.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {rfi.referDrawingFiles.map((file, i) => (
+                  <ReferDrawingThumb key={i} file={file} />
+                ))}
+              </div>
+            ) : rfi.referDrawing ? (
+              <span className="text-xs text-slate-800 font-medium">{rfi.referDrawing}</span>
+            ) : null}
+          </div>
           <Field label="Location"         value={rfi.location} />
           <Field label="Area"             value={rfi.area} />
           <Field label="Working Step"     value={rfi.workingStep} />
+          <Field label="Structure Type"   value={rfi.structureType} />
           <div className="col-span-3">
             <Field label="Detail of Inspection" value={rfi.detailInspection} />
           </div>
@@ -85,6 +137,30 @@ export default function RfiDetailModal({ rfi, onClose }) {
 
         {rfi.stage >= 2 && (
           <Section number="2" title="Issue to Client (Stage 2)" color="bg-blue-500">
+            <div className="col-span-3 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                {emailOk ? (
+                  <>
+                    <ArrowRight size={14} className="text-green-600" />
+                    <span className="text-xs font-semibold text-green-700">Send Email OK</span>
+                    <CheckCircle2 size={14} className="text-green-600" />
+                  </>
+                ) : (
+                  <span className="text-xs font-semibold text-slate-500">Email status: Not sent</span>
+                )}
+              </div>
+              {rfi.stage === 2 && !emailOk && (
+                <button
+                  type="button"
+                  onClick={markEmailSent}
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-xs font-semibold transition-colors"
+                  title="Mark Send Email OK"
+                >
+                  <Send size={14} />
+                  ส่ง Email
+                </button>
+              )}
+            </div>
             <Field label="Issue Date"             value={rfi.issueDate} />
             <Field label="Inspection Package"     value={rfi.inspectionPackage} />
             <Field label="Schedule Date"          value={rfi.inspectionScheduleDate} />
