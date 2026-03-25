@@ -136,6 +136,11 @@ function DocRow({ doc, isLatest, isHistory, onEdit, onDelete, onDuplicate, rowIn
       <td className="px-4 py-2.5 text-slate-600 whitespace-nowrap text-[11px]">{doc.transmittalDate || '—'}</td>
       <td className="px-4 py-2.5 text-slate-600 whitespace-nowrap text-[11px]">{doc.from || '—'}</td>
       <td className="px-4 py-2.5">
+        <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium whitespace-nowrap ${doc.isExternal ? 'bg-sky-100 text-sky-700' : 'bg-violet-100 text-violet-700'}`}>
+          {doc.isExternal ? 'External' : 'Internal'}
+        </span>
+      </td>
+      <td className="px-4 py-2.5">
         <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium whitespace-nowrap ${CAT_COLORS[doc.category] || 'bg-slate-100 text-slate-600'}`}>
           {doc.category}
         </span>
@@ -239,6 +244,11 @@ function DocGroup({ docNo, docs, latestId, showAllRevs, onEdit, onDelete, onDupl
         <td className="px-4 py-2.5 font-mono text-slate-700 whitespace-nowrap text-[11px]">{latestDoc?.transmittalNo}</td>
         <td className="px-4 py-2.5 text-slate-600 whitespace-nowrap text-[11px]">{latestDoc?.transmittalDate || '—'}</td>
         <td className="px-4 py-2.5 text-slate-600 whitespace-nowrap text-[11px]">{latestDoc?.from || '—'}</td>
+        <td className="px-4 py-2.5">
+          <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium whitespace-nowrap ${latestDoc?.isExternal ? 'bg-sky-100 text-sky-700' : 'bg-violet-100 text-violet-700'}`}>
+            {latestDoc?.isExternal ? 'External' : 'Internal'}
+          </span>
+        </td>
         <td className="px-4 py-2.5">
           <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium whitespace-nowrap ${CAT_COLORS[latestDoc?.category] || 'bg-slate-100 text-slate-600'}`}>
             {latestDoc?.category}
@@ -519,7 +529,7 @@ export default function QcDocumentsPage() {
           <table className="w-full text-xs">
             <thead>
               <tr className="bg-slate-800 text-white">
-                {['#', 'Transmittal No.', 'Trans. Date', 'From', 'Category', 'Document No.', 'Document Title', 'Receive Date', 'Revision', 'Status', 'Delivery', 'Attachments', (canDuplicateTransmittal || canAddTransmittal || canEditTransmittal || canDeleteTransmittal) ? 'Actions' : ''].filter(Boolean).map(h => (
+                {['#', 'Transmittal No.', 'Trans. Date', 'From', 'Type', 'Category', 'Document No.', 'Document Title', 'Receive Date', 'Revision', 'Status', 'Delivery', 'Attachments', (canDuplicateTransmittal || canAddTransmittal || canEditTransmittal || canDeleteTransmittal) ? 'Actions' : ''].filter(Boolean).map(h => (
                   <th key={h} className="px-4 py-3 text-left font-semibold whitespace-nowrap text-[11px] tracking-wide">{h}</th>
                 ))}
               </tr>
@@ -527,7 +537,7 @@ export default function QcDocumentsPage() {
             <tbody className="divide-y divide-slate-50">
               {grouped.length === 0 && (
                 <tr>
-                  <td colSpan={13} className="px-4 py-12 text-center text-slate-400">
+                  <td colSpan={14} className="px-4 py-12 text-center text-slate-400">
                     No documents found for <span className="font-semibold">{selectedProject?.name}</span>.
                     {search || filterCat || filterStatus ? ' Try clearing filters.' : ''}
                   </td>

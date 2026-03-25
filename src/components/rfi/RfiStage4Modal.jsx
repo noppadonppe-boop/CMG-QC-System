@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   ref as storageRef,
   uploadBytesResumable,
@@ -9,9 +9,15 @@ import { FormField, Input, Select, Textarea, FormGrid } from '../common/FormFiel
 import { storage } from '../../config/firebase';
 import { useMenuPermissions } from '../../auth/useMenuPermissions';
 import { Upload, X, Loader2, FileText, FileSpreadsheet, Image } from 'lucide-react';
+import { useApp } from '../../context/AppContext';
 
 const RESULT_OPTIONS = ['Pass', 'Reject', 'Comment', 'Pass with comment'];
-const STATUS_OPTIONS = ['Complete document', 'Waiting approve', 'Close'];
+
+const S4_WORKFLOW = {
+  QC_SIGNED: 'QC Signed',
+  CONTRACTOR_SIGNED: 'Contractor Signed',
+  RFI_CLOSED: 'RFI Closed',
+};
 
 const S4_MIME = [
   'application/pdf',
@@ -32,11 +38,23 @@ function fileIcon(name = '') {
   return <FileText size={12} className="text-orange-500 shrink-0" />;
 }
 
-function Stage4Uploader({ label, files, setFiles, projectId, requestNo, folder, disabled, accentColor = 'green' }) {
+function Stage4Uploader({
+  label,
+  files,
+  setFiles,
+  projectId,
+  requestNo,
+  folder,
+  disabled,
+  locked = false,
+  onUploaded,
+  accentColor = 'green',
+}) {
   const inputRef = useRef(null);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [errorMsg, setErrorMsg] = useState('');
+  const isDisabled = disabled || locked;
 
   const colors = {
     green: {
@@ -53,7 +71,7 @@ function Stage4Uploader({ label, files, setFiles, projectId, requestNo, folder, 
   const c = colors[accentColor] || colors.green;
 
   async function handleFiles(fileList) {
-    if (disabled) return;
+    if (isDisabled) return;
     if (!projectId || !requestNo) {
       setErrorMsg('ไม่พบ Project/Request No — กรุณารีโหลดหน้าแล้วลองใหม่');
       return;
@@ -88,14 +106,18 @@ function Stage4Uploader({ label, files, setFiles, projectId, requestNo, folder, 
       const url = await getDownloadURL(task.snapshot.ref);
       results.push({ name: file.name, url });
     }
-    setFiles(prev => [...prev, ...results]);
+    setFiles(prev => {
+      const merged = [...prev, ...results];
+      onUploaded?.(merged, results);
+      return merged;
+    });
     setUploading(false);
     setProgress(0);
     if (inputRef.current) inputRef.current.value = '';
   }
 
   function removeFile(idx) {
-    if (disabled) return;
+    if (isDisabled) return;
     setFiles(prev => prev.filter((_, i) => i !== idx));
   }
 
@@ -125,8 +147,8 @@ function Stage4Uploader({ label, files, setFiles, projectId, requestNo, folder, 
       )}
       <button
         type="button"
-        onClick={() => !disabled && inputRef.current?.click()}
-        disabled={disabled || uploading}
+        onClick={() => !isDisabled && inputRef.current?.click()}
+        disabled={isDisabled || uploading}
         className={`flex items-center gap-2 px-3 py-1.5 text-[11px] font-medium rounded-lg border border-dashed border-slate-300 text-slate-600 ${c.hover} transition-colors disabled:opacity-50 disabled:cursor-not-allowed`}
       >
         {uploading ? (
@@ -146,6 +168,7 @@ function Stage4Uploader({ label, files, setFiles, projectId, requestNo, folder, 
 
 export default function RfiStage4Modal({ rfi, onSave, onClose }) {
   const { canAction } = useMenuPermissions();
+  const { updateRfi } = useApp();
   const canUploadClientSign = canAction('rfi', 'uploadRfiS4ClientSign');
   const canUploadComplete   = canAction('rfi', 'uploadRfiS4Complete');
 
@@ -157,19 +180,46 @@ export default function RfiStage4Modal({ rfi, onSave, onClose }) {
     inspectionDate:   rfi.inspectionDate   || '',
   });
 
+  const [workflowStatus, setWorkflowStatus] = useState(rfi.stage4Status || '');
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
+
   const [clientSignFiles, setClientSignFiles] = useState(
     Array.isArray(rfi.stage4ClientSignFiles) ? rfi.stage4ClientSignFiles : [],
   );
   const [completeFiles, setCompleteFiles] = useState(
     Array.isArray(rfi.stage4CompleteFiles) ? rfi.stage4CompleteFiles : [],
   );
+  const [ownerSignFiles, setOwnerSignFiles] = useState(
+    Array.isArray(rfi.stage4OwnerSignFiles) ? rfi.stage4OwnerSignFiles : [],
+  );
 
   const set = (field) => (e) => setForm(f => ({ ...f, [field]: e.target.value }));
 
-  function handleSubmit(e) {
-    e.preventDefault();
-    if (!form.stage4Result || !form.stage4Status) return;
-    onSave({ ...form, stage4ClientSignFiles: clientSignFiles, stage4CompleteFiles: completeFiles });
+  const step = useMemo(() => {
+    if (workflowStatus === S4_WORKFLOW.RFI_CLOSED) return 4; // done
+    if (workflowStatus === S4_WORKFLOW.CONTRACTOR_SIGNED) return 3;
+    if (workflowStatus === S4_WORKFLOW.QC_SIGNED) return 2;
+    return 1;
+  }, [workflowStatus]);
+
+  const canUploadStep1 = canUploadClientSign && step === 1;
+  const canUploadStep2 = canUploadComplete && step === 2;
+  const canUploadStep3 = canUploadComplete && step === 3;
+
+  const canStartWorkflow = Boolean(form.inspectionDate && form.stage4Result);
+
+  async function persist(changes, nextStatus) {
+    setSaving(true);
+    setSaveError('');
+    try {
+      await updateRfi(rfi.id, changes);
+      if (nextStatus != null) setWorkflowStatus(nextStatus);
+    } catch (err) {
+      setSaveError(err?.message ?? 'บันทึกไม่สำเร็จ');
+    } finally {
+      setSaving(false);
+    }
   }
 
   const resultStyle = {
@@ -230,7 +280,7 @@ export default function RfiStage4Modal({ rfi, onSave, onClose }) {
         )}
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-5">
+      <div className="space-y-5">
         <FormGrid cols={2}>
           <FormField label="Inspection Date (Confirm)" required>
             <Input type="date" value={form.inspectionDate} onChange={set('inspectionDate')} />
@@ -253,24 +303,31 @@ export default function RfiStage4Modal({ rfi, onSave, onClose }) {
           </div>
         )}
 
-        <FormField label="Document Completion Status" required>
-          <div className="grid grid-cols-3 gap-3 mt-1">
-            {STATUS_OPTIONS.map(s => (
-              <label key={s} className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl border cursor-pointer transition-all text-xs font-semibold ${
-                form.stage4Status === s
-                  ? s === 'Close' ? 'bg-green-500 border-green-500 text-white shadow-md'
-                    : s === 'Complete document' ? 'bg-blue-500 border-blue-500 text-white shadow-md'
-                    : 'bg-amber-400 border-amber-400 text-white shadow-md'
-                  : 'bg-white border-slate-200 text-slate-600 hover:border-slate-400'
-              }`}>
-                <input type="radio" name="stage4Status" value={s} checked={form.stage4Status === s}
-                  onChange={set('stage4Status')} className="hidden" />
-                <span className="text-sm">{s === 'Close' ? '🔒' : s === 'Complete document' ? '📄' : '⏳'}</span>
-                {s}
-              </label>
-            ))}
+        <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Document Workflow (Stage 4)</div>
+              <div className="text-xs font-bold text-slate-700 mt-0.5 truncate">
+                Status: <span className="text-slate-900">{workflowStatus || '—'}</span>
+              </div>
+              {!canStartWorkflow && (
+                <div className="text-[11px] text-amber-600 mt-1">
+                  กรุณากรอก Inspection Date และ Final Result ก่อนเริ่มอัปโหลด Step 1
+                </div>
+              )}
+            </div>
+            {saving && (
+              <div className="text-[11px] text-slate-500 flex items-center gap-2 shrink-0">
+                <Loader2 size={12} className="animate-spin" /> Saving...
+              </div>
+            )}
           </div>
-        </FormField>
+          {saveError && (
+            <div className="text-[11px] text-red-600 mt-2 flex items-center gap-2">
+              <X size={12} /> {saveError}
+            </div>
+          )}
+        </div>
 
         <FormField label="Note / Document Comments">
           <Textarea value={form.stage4Note} onChange={set('stage4Note')}
@@ -279,20 +336,73 @@ export default function RfiStage4Modal({ rfi, onSave, onClose }) {
 
         <div className="space-y-4 pt-2 border-t border-slate-100">
           <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Document Uploads</div>
-          <FormField label="Document field information — Client Sign (Upload)">
+          <FormField label="Step 1 — QC Sign (Upload)">
             <Stage4Uploader
-              label={canUploadClientSign ? 'เลือกไฟล์ Client Sign' : 'ไม่มีสิทธิ์อัปโหลด (ดูไฟล์เท่านั้น)'}
+              label={
+                !canStartWorkflow ? 'กรอกข้อมูลด้านบนก่อนเริ่ม Step 1' :
+                canUploadClientSign ? 'เลือกไฟล์ QC Sign' : 'ไม่มีสิทธิ์อัปโหลด (ดูไฟล์เท่านั้น)'
+              }
               files={clientSignFiles} setFiles={setClientSignFiles}
               projectId={rfi.projectId} requestNo={rfi.requestNo}
-              folder="client-sign" disabled={!canUploadClientSign} accentColor="teal"
+              folder="qc-sign"
+              disabled={!canStartWorkflow || !canUploadStep1}
+              locked={step > 1}
+              onUploaded={(merged) => {
+                const next = S4_WORKFLOW.QC_SIGNED;
+                persist({
+                  ...form,
+                  stage: 4,
+                  stage4Status: next,
+                  statusDoc: next,
+                  statusInsp: form.stage4Result,
+                  stage4ClientSignFiles: merged,
+                }, next);
+              }}
+              accentColor="teal"
             />
           </FormField>
-          <FormField label="Document field information — Complete (Upload)">
+          <FormField label="Step 2 — Contractor Signed (Upload)">
             <Stage4Uploader
-              label={canUploadComplete ? 'เลือกไฟล์ Complete document' : 'ไม่มีสิทธิ์อัปโหลด (ดูไฟล์เท่านั้น)'}
+              label={
+                step < 2 ? 'รอ Step 1: QC Signed' :
+                canUploadComplete ? 'เลือกไฟล์ Contractor Sign' : 'ไม่มีสิทธิ์อัปโหลด (ดูไฟล์เท่านั้น)'
+              }
               files={completeFiles} setFiles={setCompleteFiles}
               projectId={rfi.projectId} requestNo={rfi.requestNo}
-              folder="complete" disabled={!canUploadComplete} accentColor="green"
+              folder="contractor-sign"
+              disabled={step !== 2 || !canUploadStep2}
+              locked={step > 2}
+              onUploaded={(merged) => {
+                const next = S4_WORKFLOW.CONTRACTOR_SIGNED;
+                persist({
+                  stage4Status: next,
+                  statusDoc: next,
+                  stage4CompleteFiles: merged,
+                }, next);
+              }}
+              accentColor="green"
+            />
+          </FormField>
+          <FormField label="Step 3 — Owner Sign (Upload)">
+            <Stage4Uploader
+              label={
+                step < 3 ? 'รอ Step 2: Contractor Signed' :
+                canUploadComplete ? 'เลือกไฟล์ Owner Sign' : 'ไม่มีสิทธิ์อัปโหลด (ดูไฟล์เท่านั้น)'
+              }
+              files={ownerSignFiles} setFiles={setOwnerSignFiles}
+              projectId={rfi.projectId} requestNo={rfi.requestNo}
+              folder="owner-sign"
+              disabled={step !== 3 || !canUploadStep3}
+              locked={step > 3}
+              onUploaded={(merged) => {
+                const next = S4_WORKFLOW.RFI_CLOSED;
+                persist({
+                  stage4Status: next,
+                  statusDoc: next,
+                  stage4OwnerSignFiles: merged,
+                }, next);
+              }}
+              accentColor="green"
             />
           </FormField>
         </div>
@@ -302,12 +412,22 @@ export default function RfiStage4Modal({ rfi, onSave, onClose }) {
             className="px-4 py-2 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
             Cancel
           </button>
-          <button type="submit" disabled={!form.stage4Result || !form.stage4Status}
-            className="px-6 py-2 text-xs font-semibold text-white bg-green-600 hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition-colors">
-            Complete Document ✓
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => persist({
+              ...form,
+              stage4Status: workflowStatus || rfi.stage4Status || '',
+              statusDoc: workflowStatus || rfi.stage4Status || '',
+              statusInsp: form.stage4Result,
+            })}
+            className="px-6 py-2 text-xs font-semibold text-white bg-green-600 hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition-colors"
+            title="Save form fields (ไม่เปลี่ยนขั้นตอน)"
+          >
+            Save
           </button>
         </div>
-      </form>
+      </div>
     </Modal>
   );
 }

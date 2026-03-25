@@ -210,6 +210,23 @@ export default function RfiStage2Modal({ rfi, onSave, onClose }) {
               {rfi.detailInspection || '—'}
             </div>
           </div>
+
+          {(rfi.brand || rfi.cementQty || rfi.cementUnit || rfi.concretePourDate) && (
+            <div className="col-span-3 mt-1">
+              <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider block mb-1">Concrete / Material</span>
+              <div className="flex flex-wrap gap-x-6 gap-y-1 bg-white border border-slate-200 rounded-lg px-3 py-2">
+                {rfi.concretePourDate && (
+                  <div>วันที่เทคอนกรีต: <span className="font-semibold text-slate-800">{rfi.concretePourDate}</span></div>
+                )}
+                {rfi.brand && (
+                  <div>BRAND: <span className="font-semibold text-slate-800">{rfi.brand}</span></div>
+                )}
+                {rfi.cementQty && (
+                  <div>ปริมาณที่จองปูน: <span className="font-semibold text-slate-800">{rfi.cementQty}{rfi.cementUnit ? ` ${rfi.cementUnit}` : ''}</span></div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

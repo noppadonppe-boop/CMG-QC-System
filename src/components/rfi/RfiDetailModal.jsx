@@ -217,7 +217,6 @@ export default function RfiDetailModal({ rfi, onClose }) {
         {rfi.stage >= 4 && (
           <Section number="4" title="Complete Document (Stage 4)" color="bg-green-500">
             <Field label="Result"   value={rfi.stage4Result} />
-            <Field label="Status"   value={rfi.stage4Status} />
             <div className="col-span-3">
               <Field label="Note" value={rfi.stage4Note} />
             </div>
@@ -256,14 +255,16 @@ export default function RfiDetailModal({ rfi, onClose }) {
         )}
 
         {/* Concrete/Test section */}
-        {(rfi.concretePourDate || rfi.brand || rfi.status7Day || rfi.status28Day || rfi.steelTestResult || rfi.soilTestResult) && (
+        {(rfi.concretePourDate || rfi.brand || rfi.cementQty || rfi.cementUnit || rfi.status7Day || rfi.status28Day || rfi.steelTestResult || rfi.soilTestResult) && (
           <Section number="+" title="Concrete / Material Test Data" color="bg-slate-400">
-            <Field label="Pour Date"        value={rfi.concretePourDate} />
-            <Field label="Brand"            value={rfi.brand} />
-            <Field label="7-Day Status"     value={rfi.status7Day} />
-            <Field label="28-Day Status"    value={rfi.status28Day} />
-            <Field label="Steel Test"       value={rfi.steelTestResult} />
-            <Field label="Soil Test"        value={rfi.soilTestResult} />
+            <Field label="Pour Date"            value={rfi.concretePourDate} />
+            <Field label="Brand (ปูนซีเมนต์)"  value={rfi.brand} />
+            <Field label="ปริมาณที่จองปูน"      value={rfi.cementQty} />
+            <Field label="หน่วย"                value={rfi.cementUnit} />
+            <Field label="7-Day Status"         value={rfi.status7Day} />
+            <Field label="28-Day Status"        value={rfi.status28Day} />
+            <Field label="Steel Test"           value={rfi.steelTestResult} />
+            <Field label="Soil Test"            value={rfi.soilTestResult} />
           </Section>
         )}
       </div>

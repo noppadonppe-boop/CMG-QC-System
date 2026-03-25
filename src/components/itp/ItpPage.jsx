@@ -116,7 +116,7 @@ export default function ItpPage() {
           { label: 'Total ITP Items', value: projectItems.length,                                        color: 'text-slate-700',   bg: 'bg-slate-100'   },
           { label: 'Client ITP',      value: projectItems.filter(i => i.itpBy === 'Client ITP').length,  color: 'text-blue-600',    bg: 'bg-blue-50'     },
           { label: 'CMG ITP',         value: projectItems.filter(i => i.itpBy === 'CMG ITP').length,     color: 'text-orange-600',  bg: 'bg-orange-50'   },
-          { label: 'With Attachment', value: projectItems.filter(i => i.attachmentLink).length,          color: 'text-green-600',   bg: 'bg-green-50'    },
+          { label: 'With Attachment', value: projectItems.filter(i => (Array.isArray(i.attachments) && i.attachments.length > 0) || i.attachmentLink).length, color: 'text-green-600', bg: 'bg-green-50' },
         ].map(s => (
           <div key={s.label} className="bg-white rounded-xl p-3 shadow-sm border border-slate-100 flex items-center gap-3">
             <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${s.bg}`}>
@@ -166,7 +166,7 @@ export default function ItpPage() {
           <table className="w-full text-xs">
             <thead>
               <tr className="bg-slate-800 text-white">
-                {['#', 'ITP Item / Description', 'ITP By', 'Type ITC', 'Attachment', 'Note', (canEditItp || canDeleteItp) ? 'Actions' : ''].filter(Boolean).map(h => (
+                {['#', 'ITP Item / Description', 'ITP By', 'Type ITC', 'Doc. No.', 'Rev.', 'Attachment', 'Note', (canEditItp || canDeleteItp) ? 'Actions' : ''].filter(Boolean).map(h => (
                   <th key={h} className="px-4 py-3 text-left font-semibold whitespace-nowrap text-[11px] tracking-wide">{h}</th>
                 ))}
               </tr>
@@ -174,7 +174,7 @@ export default function ItpPage() {
             <tbody className="divide-y divide-slate-50">
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-slate-400">
+                  <td colSpan={9} className="px-4 py-12 text-center text-slate-400">
                     No ITP items for <span className="font-semibold">{selectedProject?.name}</span>.
                   </td>
                 </tr>
@@ -195,8 +195,27 @@ export default function ItpPage() {
                       {item.typeItc}
                     </span>
                   </td>
-                  <td className="px-4 py-3">
-                    {item.attachmentLink ? (
+                  <td className="px-4 py-3 font-mono text-slate-700 text-[11px] whitespace-nowrap">
+                    {item.docNo || <span className="text-slate-300">—</span>}
+                  </td>
+                  <td className="px-4 py-3 font-mono text-slate-700 text-[11px] whitespace-nowrap">
+                    {item.rev ? (
+                      <span className="px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 font-bold text-[10px]">
+                        Rev. {item.rev}
+                      </span>
+                    ) : <span className="text-slate-300">—</span>}
+                  </td>
+                  <td className="px-4 py-3 min-w-[140px]">
+                    {Array.isArray(item.attachments) && item.attachments.length > 0 ? (
+                      <div className="flex flex-col gap-0.5">
+                        {item.attachments.map((f, i) => (
+                          <a key={i} href={f.url} target="_blank" rel="noopener noreferrer"
+                            className="flex items-center gap-1 text-[11px] text-blue-600 hover:text-blue-800 whitespace-nowrap">
+                            <ExternalLink size={10} />{f.name}
+                          </a>
+                        ))}
+                      </div>
+                    ) : item.attachmentLink ? (
                       <a href={item.attachmentLink} target="_blank" rel="noopener noreferrer"
                         className="flex items-center gap-1 text-[11px] text-blue-600 hover:text-blue-800 whitespace-nowrap">
                         <ExternalLink size={11} /> Open Link

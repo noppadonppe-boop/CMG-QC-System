@@ -246,6 +246,10 @@ export default function QcDocModal({ doc, onSave, onClose, projectDocs = [], isD
   async function handleSubmit(e) {
     e.preventDefault();
     if (submitting) return;
+    if (form.isExternal === true && !form.transmittalNoRef?.trim()) {
+      alert('กรุณากรอก Transmittal No Ref. เนื่องจากเลือก Type เป็น External');
+      return;
+    }
     if (!form.rev?.trim()) {
       alert('กรุณากรอก Rev.');
       return;
@@ -303,15 +307,6 @@ export default function QcDocModal({ doc, onSave, onClose, projectDocs = [], isD
           </p>
         )}
 
-        {/* Row 1: Transmittal No Ref */}
-        <FormField label="Transmittal No Ref.">
-          <Input
-            value={form.transmittalNoRef || ''}
-            onChange={setField('transmittalNoRef')}
-            placeholder="อ้างอิงเลข Transmittal เดิม (ถ้ามี)"
-          />
-        </FormField>
-
         {/* Type: Internal / External */}
         <FormField label="Type">
           <div className="flex items-center gap-4 mt-1.5">
@@ -336,6 +331,16 @@ export default function QcDocModal({ doc, onSave, onClose, projectDocs = [], isD
               External
             </label>
           </div>
+        </FormField>
+
+        {/* Transmittal No Ref — required when External */}
+        <FormField label="Transmittal No Ref." required={form.isExternal === true}>
+          <Input
+            value={form.transmittalNoRef || ''}
+            onChange={setField('transmittalNoRef')}
+            placeholder={form.isExternal ? 'กรอกเลข Transmittal อ้างอิง (บังคับ)' : 'อ้างอิงเลข Transmittal เดิม (ถ้ามี)'}
+            required={form.isExternal === true}
+          />
         </FormField>
 
         {/* Row 2: Transmittal Date, From */}

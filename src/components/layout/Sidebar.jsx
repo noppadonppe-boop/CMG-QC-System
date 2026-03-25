@@ -3,6 +3,7 @@ import {
   LayoutDashboard, FolderOpen, FileText, ClipboardList,
   AlertTriangle, PackageCheck, ListChecks, Handshake,
   Archive, ChevronDown, ChevronRight, Users, ShieldCheck,
+  PencilRuler,
 } from 'lucide-react';
 import { collection, doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../config/firebase';
@@ -70,6 +71,12 @@ const NAV_ITEMS = [
     label: 'Final Document Package',
     icon: Archive,
     roles: ['MD', 'CD', 'PM', 'QcDocCenter'],
+  },
+  {
+    id: 'markup-dwg',
+    label: 'Markup DWG',
+    icon: PencilRuler,
+    roles: ['MD', 'CD', 'PM', 'QcDocCenter', 'SiteQcInspector'],
   },
   // admin-users ถูกควบคุมเพิ่มเติมด้านล่าง (MasterAdmin เท่านั้น)
 ];

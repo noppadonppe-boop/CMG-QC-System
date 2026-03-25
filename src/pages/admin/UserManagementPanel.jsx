@@ -609,6 +609,7 @@ export default function UserManagementPanel() {
     { id: 'punchlist',     label: 'Punch List' },
     { id: 'handover',      label: 'Handover' },
     { id: 'final-package', label: 'Final Document Package' },
+    { id: 'markup-dwg',    label: 'Markup DWG' },
     { id: 'admin-users',   label: 'จัดการผู้ใช้' },
   ];
 
@@ -644,6 +645,11 @@ export default function UserManagementPanel() {
       { id: 'uploadRfiS3Inspector', label: 'Upload Stage 3 — Inspector Info' },
       { id: 'uploadRfiS4ClientSign', label: 'Upload Stage 4 — Client Sign' },
       { id: 'uploadRfiS4Complete',   label: 'Upload Stage 4 — Complete Doc' },
+    ],
+    'markup-dwg': [
+      { id: 'editMarkup',    label: 'Edit Markup' },
+      { id: 'saveMarkup',    label: 'Save Markup' },
+      { id: 'deleteMarkup',  label: 'Delete Markup' },
     ],
     materials: [
       { id: 'addMaterial',    label: 'Add Material Record' },

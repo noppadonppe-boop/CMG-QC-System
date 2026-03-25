@@ -18,6 +18,7 @@ import NcrPage           from './components/ncr/NcrPage';
 import PunchListPage     from './components/punchlist/PunchListPage';
 import HandoverPage      from './components/handover/HandoverPage';
 import FinalPackagePage  from './components/finalpackage/FinalPackagePage';
+import MarkupDwgPage     from './components/markupdwg/MarkupDwgPage';
 import ComingSoon        from './components/common/ComingSoon';
 import UserManagementPanel from './pages/admin/UserManagementPanel';
 
@@ -29,6 +30,7 @@ const MODULE_TITLES = {
   punchlist:      'Punch List Management',
   handover:       'Handover',
   'final-package':'Final Document Package',
+  'markup-dwg':   'Markup DWG',
 };
 
 function MainApp() {
@@ -45,6 +47,7 @@ function MainApp() {
     if (activePage === 'punchlist')    return <PunchListPage />;
     if (activePage === 'handover')     return <HandoverPage />;
     if (activePage === 'final-package') return <FinalPackagePage />;
+    if (activePage === 'markup-dwg')   return <MarkupDwgPage />;
     if (activePage === 'admin-users')  return <UserManagementPanel />;
     return <ComingSoon title={MODULE_TITLES[activePage] || activePage} />;
   }

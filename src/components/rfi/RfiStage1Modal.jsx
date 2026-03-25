@@ -177,7 +177,7 @@ const EMPTY = {
   attachmentDoc: '',
   statusInsp: 'Open', statusDoc: 'Open',
   dueDate: '',
-  concretePourDate: '', brand: '', cementBillLink: '', cementBillFiles: [],
+  concretePourDate: '', brand: '', cementQty: '', cementUnit: '', cementBillLink: '', cementBillFiles: [],
   status7Day: '', status28Day: '',
   steelTestResult: '', soilTestResult: '',
 };
@@ -618,13 +618,28 @@ export default function RfiStage1Modal({ rfi, onSave, onClose }) {
             <div className="w-5 h-5 rounded-full bg-slate-400 text-white flex items-center justify-center text-[10px] font-bold shrink-0">6</div>
             <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Concrete / Material Test (if applicable)</h3>
           </div>
-          <FormGrid cols={3}>
+          <FormGrid cols={4}>
             <FormField label="วันที่เทคอนกรีต">
               <Input type="date" value={form.concretePourDate} onChange={set('concretePourDate')} />
             </FormField>
             <FormField label="BRAND (ปูนซีเมนต์)">
               <Input value={form.brand} onChange={set('brand')} placeholder="TPI / SCG..." />
             </FormField>
+            <FormField label="ปริมาณที่จองปูน">
+              <Input
+                type="number"
+                min="0"
+                step="any"
+                value={form.cementQty}
+                onChange={set('cementQty')}
+                placeholder="0"
+              />
+            </FormField>
+            <FormField label="หน่วย">
+              <Input value={form.cementUnit} onChange={set('cementUnit')} placeholder="ลบ.ม. / ถุง..." />
+            </FormField>
+          </FormGrid>
+          <div className="mt-4">
             <FormField label="แนบลิงค์บิลปูน">
               <div className="space-y-2">
                 {cementBillFiles.length > 0 && (
@@ -692,7 +707,7 @@ export default function RfiStage1Modal({ rfi, onSave, onClose }) {
                 )}
               </div>
             </FormField>
-          </FormGrid>
+          </div>
           <FormGrid cols={4} className="mt-4">
             <FormField label="Status 7 Day">
               <Select value={form.status7Day} onChange={set('status7Day')}>
