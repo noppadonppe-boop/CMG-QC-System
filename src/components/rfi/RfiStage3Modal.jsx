@@ -169,6 +169,40 @@ export default function RfiStage3Modal({ rfi, onSave, onClose }) {
         </div>
       )}
 
+      {/* Current Stage 3 inspection data (if already rejected) */}
+      {rfi.result === 'Reject' && rfi.inspectionDate && (
+        <div className="mb-5 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+          <div className="text-xs font-bold text-red-700 mb-2">Stage 3: Onsite Inspection (Current - Rejected)</div>
+          <div className="grid grid-cols-3 gap-x-6 gap-y-1.5 text-[10px] text-red-600">
+            <div>Inspection Date: <span className="font-semibold text-red-800">{rfi.inspectionDate}</span></div>
+            <div>Inspection Result: <span className="font-semibold text-red-800">{rfi.result}</span></div>
+            <div>Status Insp.: <span className="font-semibold text-red-800">{rfi.statusInsp || '—'}</span></div>
+            
+            {rfi.stage3Note && (
+              <div className="col-span-3 mt-1">
+                <span className="text-[10px] text-red-400 font-semibold uppercase tracking-wider block mb-1">Inspector Comments</span>
+                <div className="text-[10px] text-red-700 bg-red-100 border border-red-200 rounded-lg px-2 py-1 whitespace-pre-wrap">
+                  {rfi.stage3Note}
+                </div>
+              </div>
+            )}
+            
+            {Array.isArray(rfi.stage3InspectorFiles) && rfi.stage3InspectorFiles.length > 0 && (
+              <div className="col-span-3 mt-1">
+                <span className="text-[10px] text-red-400 font-semibold uppercase tracking-wider block mb-1">Inspector Files</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {rfi.stage3InspectorFiles.map((file, i) => (
+                    <a key={i} href={file.url} target="_blank" rel="noopener noreferrer"
+                      className="text-[10px] px-2 py-0.5 rounded-md bg-red-100 border border-red-200 text-red-700 hover:border-red-400 truncate max-w-[160px]"
+                      title={file.name}>{file.name}</a>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       <form onSubmit={handleSubmit} className="space-y-5">
         <FormGrid cols={2}>
           <FormField label="Inspection Date" required>

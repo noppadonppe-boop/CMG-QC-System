@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import {
   Plus, Search, Eye, Pencil, ArrowRight, Trash2,
   AlertTriangle, Clock, FileCheck2, Send,
-  ClipboardCheck, X
+  ClipboardCheck, X, Download
 } from 'lucide-react';
 import { useApp }  from '../../context/AppContext';
 import { useAuth } from '../../auth/AuthContext';
@@ -276,6 +276,33 @@ function KanbanColumn({ stage, rfis, getCardPerms, onView, onEdit, onAdvance, on
 }
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
+// ── CSV Export Function ───────────────────────────────────────────────────────
+function exportToCSV(data, filename) {
+  // Convert data to CSV format
+  const headers = Object.keys(data[0] || {});
+  const csvContent = [
+    headers.join(','),
+    ...data.map(row => headers.map(header => {
+      const value = row[header] || '';
+      // Escape quotes and wrap in quotes if contains comma or quote
+      const escapedValue = String(value).replace(/"/g, '""');
+      return escapedValue.includes(',') || escapedValue.includes('"') ? `"${escapedValue}"` : escapedValue;
+    }).join(','))
+  ].join('\n');
+
+  // Create blob and download
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const link = document.createElement('a');
+  const url = URL.createObjectURL(blob);
+  link.setAttribute('href', url);
+  link.setAttribute('download', filename);
+  link.style.visibility = 'hidden';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 export default function RfiPage() {
   const {
     rfiItems, addRfi, updateRfi, deleteRfi,
@@ -313,10 +340,14 @@ export default function RfiPage() {
   // Per-card permission resolver — ใช้ Set Role เป็นหลัก
   function getCardPerms(rfi) {
     const s = rfi.stage;
+    // Hide Edit and Delete buttons for Stage 4 RFI with status "RFI Closed"
+    const isRfiClosed = s === 4 && rfi.stage4Status === 'RFI Closed';
+    // Hide Edit, Delete, and Complete buttons for Stage 3 RFI with status "Reject"
+    const isStage3Rejected = s === 3 && rfi.result === 'Reject';
     return {
-      canAdvance: canAdvanceForRfi(rfi),
-      canEdit:    canEditForStage(s),
-      canDelete:  canDeleteRfi,
+      canAdvance: isStage3Rejected ? false : canAdvanceForRfi(rfi),
+      canEdit:    isRfiClosed || isStage3Rejected ? false : canEditForStage(s),
+      canDelete:  isRfiClosed || isStage3Rejected ? false : canDeleteRfi,
     };
   }
 
@@ -384,12 +415,22 @@ export default function RfiPage() {
   }
 
   function handleSaveStage3(form) {
-    // Advance to stage 3; also update statusInsp from result
-    updateRfi(stage3Modal.id, {
-      ...form,
-      stage: 3,
-      statusInsp: form.result,
-    });
+    // Check if result is 'Comment' - if so, move back to Stage 2 and reset email status
+    if (form.result === 'Comment') {
+      updateRfi(stage3Modal.id, {
+        ...form,
+        stage: 2, // Move back to Stage 2
+        statusInsp: form.result,
+        stage2EmailStatus: '', // Reset email status to allow sending new Issue email
+      });
+    } else {
+      // Normal flow - advance to stage 3
+      updateRfi(stage3Modal.id, {
+        ...form,
+        stage: 3,
+        statusInsp: form.result,
+      });
+    }
     setStage3Modal(null);
   }
 
@@ -414,6 +455,27 @@ export default function RfiPage() {
 
   function handleDelete(rfi) {
     if (canDeleteRfi) setDeleteTarget(rfi);
+  }
+
+  function handleExcelExport() {
+    const exportData = filtered.map((rfi, idx) => ({
+      'No.': idx + 1,
+      'RFI No.': rfi.rfiNo,
+      'Request No.': rfi.requestNo,
+      'Type': rfi.typeOfInspection,
+      'Location': rfi.location,
+      'Area': rfi.area,
+      'Due Date': rfi.dueDate || '',
+      'Stage': `Stage ${rfi.stage}`,
+      'Status Insp.': rfi.statusInsp || '',
+      'Status Doc': rfi.statusDoc || '',
+      'Created Date': rfi.requestDateInternal || '',
+      'Inspection Date': rfi.inspectionDate || '',
+      'Result': rfi.result || '',
+    }));
+    
+    const filename = `RFI_Report_${selectedProject?.name || 'Export'}_${new Date().toISOString().split('T')[0]}.csv`;
+    exportToCSV(exportData, filename);
   }
 
   function confirmDelete() {
@@ -446,14 +508,25 @@ export default function RfiPage() {
               <button
                 key={m}
                 onClick={() => setViewMode(m)}
-                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all capitalize ${
-                  viewMode === m ? 'bg-white shadow text-slate-800' : 'text-slate-500 hover:text-slate-700'
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                  viewMode === m ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                {m}
+                {m === 'kanban' ? 'Board' : 'Table'}
               </button>
             ))}
           </div>
+          {/* CSV Download Button - Only show in table view */}
+          {viewMode === 'table' && filtered.length > 0 && (
+            <button
+              onClick={handleExcelExport}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-700 text-white text-xs font-medium transition-colors shadow-sm"
+              title="Download CSV"
+            >
+              <Download size={12} />
+              CSV
+            </button>
+          )}
           {canCreateRfi && (
             <button
               onClick={() => setStage1Modal(true)}
@@ -544,18 +617,18 @@ export default function RfiPage() {
       {viewMode === 'table' && (
         <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-xs">
+            <table className="w-full text-sm">
               <thead>
                 <tr className="bg-slate-800 text-white">
                   {['#', 'RFI No.', 'Request No.', 'Type', 'Location / Area', 'Due Date', 'Stage', 'Status Insp.', 'Status Doc', 'Actions'].map(h => (
-                    <th key={h} className="px-4 py-3 text-left font-semibold whitespace-nowrap text-[11px] tracking-wide">{h}</th>
+                    <th key={h} className="px-3 py-3 text-left font-semibold whitespace-nowrap text-xs tracking-wide">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={10} className="px-4 py-12 text-center text-slate-400">
+                    <td colSpan={10} className="px-3 py-8 text-center text-slate-400">
                       No RFI records for <span className="font-semibold">{selectedProject?.name}</span>.
                     </td>
                   </tr>
@@ -564,31 +637,31 @@ export default function RfiPage() {
                   const stage = STAGES[rfi.stage - 1];
                   return (
                     <tr key={rfi.id} className="hover:bg-slate-50 transition-colors group">
-                      <td className="px-4 py-3 text-slate-400 font-mono text-[11px]">{idx + 1}</td>
-                      <td className="px-4 py-3 font-mono font-bold text-slate-800 whitespace-nowrap">{rfi.rfiNo}</td>
-                      <td className="px-4 py-3 font-mono text-slate-600 whitespace-nowrap">{rfi.requestNo}</td>
-                      <td className="px-4 py-3 text-slate-700 whitespace-nowrap">{rfi.typeOfInspection}</td>
-                      <td className="px-4 py-3 text-slate-600">
+                      <td className="px-3 py-3 text-slate-400 font-mono text-xs">{idx + 1}</td>
+                      <td className="px-3 py-3 font-mono font-bold text-slate-800 whitespace-nowrap text-sm">{rfi.rfiNo}</td>
+                      <td className="px-3 py-3 font-mono text-slate-600 whitespace-nowrap text-xs">{rfi.requestNo}</td>
+                      <td className="px-3 py-3 text-slate-700 whitespace-nowrap text-xs">{rfi.typeOfInspection}</td>
+                      <td className="px-3 py-3 text-slate-600 text-xs">
                         <div>{rfi.location}</div>
                         <div className="text-[10px] text-slate-400">{rfi.area}</div>
                       </td>
-                      <td className="px-4 py-3 text-slate-500 whitespace-nowrap font-mono">{rfi.dueDate || '—'}</td>
-                      <td className="px-4 py-3">
-                        <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${stage?.badge}`}>
-                          {stage?.label}: {stage?.title}
+                      <td className="px-3 py-3 text-slate-500 whitespace-nowrap font-mono text-xs">{rfi.dueDate || '—'}</td>
+                      <td className="px-3 py-3">
+                        <span className={`text-xs font-bold px-2 py-1 rounded-full ${stage?.badge}`}>
+                          {stage?.label}
                         </span>
                       </td>
-                      <td className="px-4 py-3">
-                        <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${RESULT_COLORS[rfi.statusInsp] || 'bg-slate-100 text-slate-500'}`}>
+                      <td className="px-3 py-3">
+                        <span className={`text-xs font-semibold px-2 py-1 rounded-full ${RESULT_COLORS[rfi.statusInsp] || 'bg-slate-100 text-slate-500'}`}>
                           {rfi.statusInsp || '—'}
                         </span>
                       </td>
-                      <td className="px-4 py-3">
-                        <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${RESULT_COLORS[rfi.statusDoc] || 'bg-slate-100 text-slate-500'}`}>
+                      <td className="px-3 py-3">
+                        <span className={`text-xs font-semibold px-2 py-1 rounded-full ${RESULT_COLORS[rfi.statusDoc] || 'bg-slate-100 text-slate-500'}`}>
                           {rfi.statusDoc || '—'}
                         </span>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-3 py-3">
                         {(() => {
                           const { canAdvance, canEdit, canDelete } = getCardPerms(rfi);
                           const advCfg = STAGE_ADVANCE[rfi.stage];
@@ -596,36 +669,36 @@ export default function RfiPage() {
                             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                               <button
                                 onClick={() => setDetailModal(rfi)}
-                                className="w-7 h-7 rounded-lg bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition-colors"
+                                className="w-6 h-6 rounded bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition-colors"
                                 title="View detail"
                               >
-                                <Eye size={12} className="text-slate-600" />
+                                <Eye size={10} className="text-slate-600" />
                               </button>
                               {canEdit && (
                                 <button
                                   onClick={() => openEdit(rfi)}
-                                  className="w-7 h-7 rounded-lg bg-blue-50 hover:bg-blue-100 flex items-center justify-center transition-colors"
+                                  className="w-6 h-6 rounded bg-blue-50 hover:bg-blue-100 flex items-center justify-center transition-colors"
                                   title="Edit Stage 1"
                                 >
-                                  <Pencil size={12} className="text-blue-600" />
+                                  <Pencil size={10} className="text-blue-600" />
                                 </button>
                               )}
                               {canDelete && (
                                 <button
                                   onClick={() => handleDelete(rfi)}
-                                  className="w-7 h-7 rounded-lg bg-red-50 hover:bg-red-100 flex items-center justify-center transition-colors"
+                                  className="w-6 h-6 rounded bg-red-50 hover:bg-red-100 flex items-center justify-center transition-colors"
                                   title="Delete RFI"
                                 >
-                                  <Trash2 size={12} className="text-red-500" />
+                                  <Trash2 size={10} className="text-red-500" />
                                 </button>
                               )}
                               {canAdvance && rfi.stage < 4 && advCfg && (
                                 <button
                                   onClick={() => handleAdvance(rfi)}
-                                  className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold text-white transition-colors ${advCfg.color}`}
+                                  className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-semibold text-white transition-colors ${advCfg.color}`}
                                   title={`Advance to Stage ${rfi.stage + 1}`}
                                 >
-                                  <ArrowRight size={10} /> {advCfg.label}
+                                  <ArrowRight size={8} /> {advCfg.label}
                                 </button>
                               )}
                             </div>

@@ -94,6 +94,14 @@ const INSPECTION_TYPES = [
 
 const STATUS_OPTIONS = ['Open', 'Pending', 'Pass', 'Reject', 'Comment', 'Pass with comment'];
 
+const TAG_NO_DEFAULTS = [
+  'TAG-001',
+  'TAG-002',
+  'TAG-003',
+  'TAG-004',
+  'TAG-005',
+];
+
 const WORKING_STEP_DEFAULTS = [
   'Ecavation/Lean',
   'Formwork/Install rebar',
@@ -172,6 +180,7 @@ const EMPTY = {
   typeOfInspection: 'Concrete Pour',
   location: '', area: '',
   detailInspection: '', workingStep: '', structureType: '', referDrawing: '',
+  tagNo: '',
   referDrawingFiles: [],
   requestedBy: '', inspectedBy: '',
   attachmentDoc: '',
@@ -215,6 +224,12 @@ export default function RfiStage1Modal({ rfi, onSave, onClose }) {
   const [referDrawingFiles, setReferDrawingFiles] = useState(
     Array.isArray(form.referDrawingFiles) ? form.referDrawingFiles : [],
   );
+  const [tagNoOptions, setTagNoOptions] = useState(() => {
+    const base = [...TAG_NO_DEFAULTS];
+    const current = (rfi?.tagNo || '').trim();
+    if (current && !base.includes(current)) base.unshift(current);
+    return base;
+  });
   const [workingStepOptions, setWorkingStepOptions] = useState(() => {
     const base = [...WORKING_STEP_DEFAULTS];
     const current = (rfi?.workingStep || '').trim();
@@ -241,6 +256,23 @@ export default function RfiStage1Modal({ rfi, onSave, onClose }) {
   const [cementBillProgress, setCementBillProgress] = useState(0);
   const [cementBillError, setCementBillError] = useState('');
   const [cementBillPreviewUrl, setCementBillPreviewUrl] = useState(null);
+
+  function addTagNoOption() {
+    const val = window.prompt('เพิ่มรายการ Tag No.');
+    const next = (val || '').trim();
+    if (!next) return;
+    setTagNoOptions(prev => (prev.includes(next) ? prev : [...prev, next]));
+    setForm(f => ({ ...f, tagNo: next }));
+  }
+
+  function removeTagNoOption() {
+    const current = (form.tagNo || '').trim();
+    if (!current) return;
+    const ok = window.confirm(`ลบรายการนี้ออกจาก dropdown?\n\n"${current}"`);
+    if (!ok) return;
+    setTagNoOptions(prev => prev.filter(x => x !== current));
+    setForm(f => ({ ...f, tagNo: '' }));
+  }
 
   function addWorkingStepOption() {
     const val = window.prompt('เพิ่มรายการ Working Step');
@@ -403,17 +435,29 @@ export default function RfiStage1Modal({ rfi, onSave, onClose }) {
               {canEditRfiNo ? (
                 <Input value={form.rfiNo} onChange={set('rfiNo')} placeholder="RFI-2024-001" required />
               ) : (
-                <div className="space-y-0.5">
-                  <Input
-                    value={rfi ? form.rfiNo : (form.rfiNo || '-')}
-                    readOnly
-                    className="bg-slate-50 text-slate-600 cursor-not-allowed"
-                  />
-                  <p className="text-[10px] text-slate-500">เฉพาะ Role ที่มีสิทธิ์ &quot;กรอก / แก้ไข RFI No.&quot; ใน Set Role เท่านั้นที่แก้ไขฟิลด์นี้ได้</p>
-                </div>
+                <Input value={form.rfiNo} disabled placeholder="Auto-generated" />
               )}
             </FormField>
-            <FormField label="Type of Inspection">
+            <FormField label="Request No." required>
+              <Input value={form.requestNo} onChange={set('requestNo')} placeholder="RQI-CMG2024001-0001" required />
+            </FormField>
+            <FormField label="Tag No.">
+              <div className="flex items-center gap-1">
+                <Select value={form.tagNo} onChange={set('tagNo')}>
+                  <option value="">— Select Tag No. —</option>
+                  {tagNoOptions.map(opt => <option key={opt}>{opt}</option>)}
+                </Select>
+                <button type="button" onClick={addTagNoOption} className="p-1.5 rounded bg-green-100 hover:bg-green-200 text-green-700 transition-colors" title="เพิ่ม Tag No.">
+                  <Plus size={12} />
+                </button>
+                {form.tagNo && (
+                  <button type="button" onClick={removeTagNoOption} className="p-1.5 rounded bg-red-100 hover:bg-red-200 text-red-700 transition-colors" title="ลบ Tag No.">
+                    <Trash2 size={12} />
+                  </button>
+                )}
+              </div>
+            </FormField>
+            <FormField label="Type of Inspection" required>
               <Select value={form.typeOfInspection} onChange={set('typeOfInspection')}>
                 {INSPECTION_TYPES.map(t => <option key={t}>{t}</option>)}
               </Select>

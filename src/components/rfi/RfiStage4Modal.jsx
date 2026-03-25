@@ -207,7 +207,7 @@ export default function RfiStage4Modal({ rfi, onSave, onClose }) {
   const canUploadStep2 = canUploadComplete && step === 2;
   const canUploadStep3 = canUploadComplete && step === 3;
 
-  const canStartWorkflow = Boolean(form.inspectionDate && form.stage4Result);
+  const canStartWorkflow = true; // Always allow workflow to start in Stage 4
 
   async function persist(changes, nextStatus) {
     setSaving(true);
@@ -281,27 +281,6 @@ export default function RfiStage4Modal({ rfi, onSave, onClose }) {
       </div>
 
       <div className="space-y-5">
-        <FormGrid cols={2}>
-          <FormField label="Inspection Date (Confirm)" required>
-            <Input type="date" value={form.inspectionDate} onChange={set('inspectionDate')} />
-          </FormField>
-          <FormField label="Final Result" required>
-            <Select value={form.stage4Result} onChange={set('stage4Result')} required>
-              <option value="">— Select Final Result —</option>
-              {RESULT_OPTIONS.map(r => <option key={r}>{r}</option>)}
-            </Select>
-          </FormField>
-        </FormGrid>
-
-        {form.stage4Result && (
-          <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold border ${resultStyle[form.stage4Result] || 'bg-slate-50 border-slate-200 text-slate-600'}`}>
-            <span className="text-base">
-              {form.stage4Result === 'Pass' ? '✅' : form.stage4Result === 'Reject' ? '❌' :
-               form.stage4Result === 'Comment' ? '💬' : form.stage4Result === 'Pass with comment' ? '✔️' : ''}
-            </span>
-            Final Result: <span className="font-bold">{form.stage4Result}</span>
-          </div>
-        )}
 
         <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3">
           <div className="flex items-center justify-between gap-3">
@@ -310,11 +289,6 @@ export default function RfiStage4Modal({ rfi, onSave, onClose }) {
               <div className="text-xs font-bold text-slate-700 mt-0.5 truncate">
                 Status: <span className="text-slate-900">{workflowStatus || '—'}</span>
               </div>
-              {!canStartWorkflow && (
-                <div className="text-[11px] text-amber-600 mt-1">
-                  กรุณากรอก Inspection Date และ Final Result ก่อนเริ่มอัปโหลด Step 1
-                </div>
-              )}
             </div>
             {saving && (
               <div className="text-[11px] text-slate-500 flex items-center gap-2 shrink-0">
@@ -339,13 +313,12 @@ export default function RfiStage4Modal({ rfi, onSave, onClose }) {
           <FormField label="Step 1 — QC Sign (Upload)">
             <Stage4Uploader
               label={
-                !canStartWorkflow ? 'กรอกข้อมูลด้านบนก่อนเริ่ม Step 1' :
                 canUploadClientSign ? 'เลือกไฟล์ QC Sign' : 'ไม่มีสิทธิ์อัปโหลด (ดูไฟล์เท่านั้น)'
               }
               files={clientSignFiles} setFiles={setClientSignFiles}
               projectId={rfi.projectId} requestNo={rfi.requestNo}
               folder="qc-sign"
-              disabled={!canStartWorkflow || !canUploadStep1}
+              disabled={!canUploadStep1}
               locked={step > 1}
               onUploaded={(merged) => {
                 const next = S4_WORKFLOW.QC_SIGNED;
@@ -354,7 +327,7 @@ export default function RfiStage4Modal({ rfi, onSave, onClose }) {
                   stage: 4,
                   stage4Status: next,
                   statusDoc: next,
-                  statusInsp: form.stage4Result,
+                  statusInsp: rfi.result || rfi.statusInsp,
                   stage4ClientSignFiles: merged,
                 }, next);
               }}
@@ -415,14 +388,17 @@ export default function RfiStage4Modal({ rfi, onSave, onClose }) {
           <button
             type="button"
             disabled={saving}
-            onClick={() => persist({
-              ...form,
-              stage4Status: workflowStatus || rfi.stage4Status || '',
-              statusDoc: workflowStatus || rfi.stage4Status || '',
-              statusInsp: form.stage4Result,
-            })}
+            onClick={async () => {
+              await persist({
+                ...form,
+                stage4Status: workflowStatus || rfi.stage4Status || '',
+                statusDoc: workflowStatus || rfi.stage4Status || '',
+                statusInsp: rfi.result || rfi.statusInsp,
+              });
+              onClose(); // Close modal after saving
+            }}
             className="px-6 py-2 text-xs font-semibold text-white bg-green-600 hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition-colors"
-            title="Save form fields (ไม่เปลี่ยนขั้นตอน)"
+            title="Save form fields and close modal"
           >
             Save
           </button>
