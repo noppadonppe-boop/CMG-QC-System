@@ -11,7 +11,8 @@ import { storage } from '../../config/firebase';
 import { Upload, X, Loader2, Paperclip, FileText, Image, FileSpreadsheet, Plus, Trash2 } from 'lucide-react';
 
 const CATEGORIES = ['Structural', 'Architectural', 'Mechanical', 'Electrical', 'Civil', 'HVAC', 'Plumbing', 'Landscape', 'Other'];
-const STATUSES   = ['Approved', 'For Construction', 'For Review', 'As-Built', 'Superseded', 'Void'];
+const CATEGORY_GROUPS = ['Work method', 'Material approved', 'Drawing'];
+const STATUSES   = ['Approved', 'For Construction', 'For Review', 'For Approve', 'As-Built', 'Superseded', 'Void'];
 
 const ALLOWED_MIME = [
   'application/pdf',
@@ -217,6 +218,7 @@ export default function QcDocModal({ doc, onSave, onClose, projectDocs = [], isD
       transmittalDate: todayIso(),
       byEmail:        base.byEmail        ?? true,
       category:       base.category       ?? 'Structural',
+      categoryGroup:  base.categoryGroup  ?? '',
       documentNo:     base.documentNo     ?? '',
       documentTitle:  isDuplicate ? `${base.documentTitle ?? ''} (Copy)` : '',
       receiveDate:    base.receiveDate    ?? '',
@@ -237,12 +239,7 @@ export default function QcDocModal({ doc, onSave, onClose, projectDocs = [], isD
   const isEdit     = !!doc && !isDuplicate;
   const trNo       = isEdit ? form.transmittalNo : autoTrNo;
 
-  // Generate TR number for a given row index (multi-row Add mode)
-  function getRowTrNo(rowIndex) {
-    const match = autoTrNo.match(/^(.+-)(\d+)$/);
-    if (!match) return autoTrNo;
-    return `${match[1]}${String(parseInt(match[2], 10) + rowIndex).padStart(match[2].length, '0')}`;
-  }
+
 
   function addDocRow() {
     setDocRows(prev => [...prev, { documentNo: '', rev: '', receiveDate: '' }]);
@@ -290,23 +287,20 @@ export default function QcDocModal({ doc, onSave, onClose, projectDocs = [], isD
         });
       } finally { setSubmitting(false); }
     } else {
-      /* ── Add / Duplicate mode — multi-row ── */
+      /* ── Add / Duplicate mode — multi-row (same Transmittal No.) ── */
       for (let i = 0; i < docRows.length; i++) {
         if (!docRows[i].documentNo?.trim()) { alert(`กรุณากรอก Document No. ในแถวที่ ${i + 1}`); return; }
         if (!docRows[i].rev?.trim()) { alert(`กรุณากรอก Rev. ในแถวที่ ${i + 1}`); return; }
       }
-      for (let i = 0; i < docRows.length; i++) {
-        const trNum = getRowTrNo(i);
-        if (projectDocs.some(d => (d.transmittalNo || '').trim() === trNum)) {
-          alert(`Transmittal No. "${trNum}" มีในระบบแล้ว\nกรุณาปิดหน้าต่างนี้แล้วกด Add Transmittal ใหม่`);
-          return;
-        }
+      if (projectDocs.some(d => (d.transmittalNo || '').trim() === autoTrNo)) {
+        alert(`Transmittal No. "${autoTrNo}" มีในระบบแล้ว\nกรุณาปิดหน้าต่างนี้แล้วกด Add Transmittal ใหม่`);
+        return;
       }
       setSubmitting(true);
       try {
-        const records = docRows.map((row, i) => ({
+        const records = docRows.map((row) => ({
           ...form,
-          transmittalNo: getRowTrNo(i),
+          transmittalNo: autoTrNo,
           projectId: selectedProjectId,
           projectNo: selectedProject.projectNo,
           documentNo: row.documentNo,
@@ -427,7 +421,6 @@ export default function QcDocModal({ doc, onSave, onClose, projectDocs = [], isD
                 <thead>
                   <tr className="bg-slate-50 border-b border-slate-200">
                     <th className="px-3 py-2 text-left font-semibold text-slate-600 w-10">#</th>
-                    <th className="px-3 py-2 text-left font-semibold text-slate-500 text-[10px]">Transmittal No.</th>
                     <th className="px-3 py-2 text-left font-semibold text-slate-600">Document No. <span className="text-red-500">*</span></th>
                     <th className="px-3 py-2 text-left font-semibold text-slate-600 w-24">Rev. <span className="text-red-500">*</span></th>
                     <th className="px-3 py-2 text-left font-semibold text-slate-600 w-40">Receive Date</th>
@@ -438,9 +431,6 @@ export default function QcDocModal({ doc, onSave, onClose, projectDocs = [], isD
                   {docRows.map((row, i) => (
                     <tr key={i} className="hover:bg-orange-50/30 transition-colors">
                       <td className="px-3 py-1.5 text-slate-400 font-mono text-center">{i + 1}</td>
-                      <td className="px-3 py-1.5">
-                        <span className="text-[10px] font-mono text-blue-600 font-semibold">{getRowTrNo(i)}</span>
-                      </td>
                       <td className="px-3 py-1.5">
                         <input className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-400 text-slate-700"
                           value={row.documentNo} onChange={e => updateDocRow(i, 'documentNo', e.target.value)} placeholder="S-DWG-001" />
@@ -467,7 +457,7 @@ export default function QcDocModal({ doc, onSave, onClose, projectDocs = [], isD
               </table>
             </div>
             <p className="text-[10px] text-slate-400">
-              แต่ละ Row จะสร้างเป็น 1 รายการแยก โดย Transmittal No. จะรันต่อกันอัตโนมัติ ({docRows.length} รายการ)
+              แต่ละ Row จะสร้างเป็น 1 รายการแยก โดยใช้ Transmittal No. เดียวกันทุก Row: <span className="font-semibold text-blue-600">{autoTrNo}</span> ({docRows.length} รายการ)
             </p>
           </div>
         )}
@@ -492,8 +482,14 @@ export default function QcDocModal({ doc, onSave, onClose, projectDocs = [], isD
           projectId={selectedProjectId}
         />
 
-        {/* Category / Status / Delivery */}
-        <FormGrid cols={3}>
+        {/* Category Group / Category / Status / Delivery */}
+        <FormGrid cols={4}>
+          <FormField label="Category Group หลัก">
+            <Select value={form.categoryGroup || ''} onChange={setField('categoryGroup')}>
+              <option value="">— เลือก —</option>
+              {CATEGORY_GROUPS.map(g => <option key={g}>{g}</option>)}
+            </Select>
+          </FormField>
           <FormField label="Category">
             <Select value={form.category} onChange={setField('category')}>
               {CATEGORIES.map(c => <option key={c}>{c}</option>)}

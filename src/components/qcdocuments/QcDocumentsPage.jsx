@@ -29,6 +29,12 @@ const CAT_COLORS = {
   Other:         'bg-slate-100 text-slate-600',
 };
 
+const CAT_GROUP_COLORS = {
+  'Work method':       'bg-rose-100 text-rose-700',
+  'Material approved': 'bg-amber-100 text-amber-700',
+  'Drawing':           'bg-blue-100 text-blue-700',
+};
+
 function ConfirmDelete({ doc, onConfirm, onCancel }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -142,6 +148,15 @@ function DocRow({ doc, isLatest, isHistory, onEdit, onDelete, onDuplicate, rowIn
         </span>
       </td>
       <td className="px-4 py-2.5">
+        {doc.categoryGroup ? (
+          <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium whitespace-nowrap ${CAT_GROUP_COLORS[doc.categoryGroup] || 'bg-slate-100 text-slate-600'}`}>
+            {doc.categoryGroup}
+          </span>
+        ) : (
+          <span className="text-[11px] text-slate-300">—</span>
+        )}
+      </td>
+      <td className="px-4 py-2.5">
         <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium whitespace-nowrap ${CAT_COLORS[doc.category] || 'bg-slate-100 text-slate-600'}`}>
           {doc.category}
         </span>
@@ -250,6 +265,15 @@ function DocGroup({ docNo, docs, latestId, showAllRevs, onEdit, onDelete, onDupl
           <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium whitespace-nowrap ${latestDoc?.isExternal ? 'bg-sky-100 text-sky-700' : 'bg-violet-100 text-violet-700'}`}>
             {latestDoc?.isExternal ? 'External' : 'Internal'}
           </span>
+        </td>
+        <td className="px-4 py-2.5">
+          {latestDoc?.categoryGroup ? (
+            <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium whitespace-nowrap ${CAT_GROUP_COLORS[latestDoc?.categoryGroup] || 'bg-slate-100 text-slate-600'}`}>
+              {latestDoc?.categoryGroup}
+            </span>
+          ) : (
+            <span className="text-[11px] text-slate-300">—</span>
+          )}
         </td>
         <td className="px-4 py-2.5">
           <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium whitespace-nowrap ${CAT_COLORS[latestDoc?.category] || 'bg-slate-100 text-slate-600'}`}>
@@ -534,7 +558,7 @@ export default function QcDocumentsPage() {
           <table className="w-full text-xs">
             <thead>
               <tr className="bg-slate-800 text-white">
-                {['#', 'Transmittal No.', 'Trans Ref', 'Trans. Date', 'From', 'Type', 'Category', 'Document No.', 'Document Title', 'Receive Date', 'Revision', 'Status', 'Delivery', 'Attachments', (canDuplicateTransmittal || canAddTransmittal || canEditTransmittal || canDeleteTransmittal) ? 'Actions' : ''].filter(Boolean).map(h => (
+                {['#', 'Transmittal No.', 'Trans Ref', 'Trans. Date', 'From', 'Type', 'Category Group', 'Category', 'Document No.', 'Document Title', 'Receive Date', 'Revision', 'Status', 'Delivery', 'Attachments', (canDuplicateTransmittal || canAddTransmittal || canEditTransmittal || canDeleteTransmittal) ? 'Actions' : ''].filter(Boolean).map(h => (
                   <th key={h} className="px-4 py-3 text-left font-semibold whitespace-nowrap text-[11px] tracking-wide">{h}</th>
                 ))}
               </tr>
@@ -542,7 +566,7 @@ export default function QcDocumentsPage() {
             <tbody className="divide-y divide-slate-50">
               {grouped.length === 0 && (
                 <tr>
-                  <td colSpan={15} className="px-4 py-12 text-center text-slate-400">
+                  <td colSpan={16} className="px-4 py-12 text-center text-slate-400">
                     No documents found for <span className="font-semibold">{selectedProject?.name}</span>.
                     {search || filterCat || filterStatus ? ' Try clearing filters.' : ''}
                   </td>
