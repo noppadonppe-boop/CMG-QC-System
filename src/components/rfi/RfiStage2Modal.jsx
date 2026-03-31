@@ -7,7 +7,7 @@ import {
 import Modal from '../common/Modal';
 import { FormField, Input, Textarea, FormGrid, Select } from '../common/FormField';
 import { storage } from '../../config/firebase';
-import { Upload, X, Loader2, FileText, FileSpreadsheet, Image } from 'lucide-react';
+import { Upload, X, Loader2, FileText, FileSpreadsheet, Image, Pencil, Check } from 'lucide-react';
 
 const STAGE2_MIME = [
   'application/pdf',
@@ -93,6 +93,26 @@ export default function RfiStage2Modal({ rfi, onSave, onClose }) {
   const [progress, setProgress] = useState(0);
   const [errorMsg, setErrorMsg] = useState('');
 
+  // ── Stage 1 inline edit state ──
+  const [editingStage1, setEditingStage1] = useState(false);
+  const [stage1Form, setStage1Form] = useState({
+    requestNo:            rfi.requestNo            || '',
+    typeOfInspection:     rfi.typeOfInspection     || '',
+    requestDateInternal:  rfi.requestDateInternal  || '',
+    requestTimeInternal:  rfi.requestTimeInternal  || '',
+    dueDate:              rfi.dueDate              || '',
+    requestDateOwner:     rfi.requestDateOwner     || '',
+    requestTimeOwner:     rfi.requestTimeOwner     || '',
+    requestedBy:          rfi.requestedBy          || '',
+    statusInsp:           rfi.statusInsp           || '',
+    statusDoc:            rfi.statusDoc            || '',
+    workingStep:          rfi.workingStep          || '',
+    location:             rfi.location             || '',
+    area:                 rfi.area                 || '',
+    detailInspection:     rfi.detailInspection     || '',
+  });
+  const setS1 = (field) => (e) => setStage1Form(f => ({ ...f, [field]: e.target.value }));
+
   const set = (field) => (e) => setForm(f => ({ ...f, [field]: e.target.value }));
 
   function addWorkstepOption() {
@@ -158,76 +178,217 @@ export default function RfiStage2Modal({ rfi, onSave, onClose }) {
 
   function handleSubmit(e) {
     e.preventDefault();
-    onSave({ ...form, stage2Files });
+    // Merge stage1 edits (if any) with stage2 form data
+    const stage1Updates = editingStage1 ? { ...stage1Form } : {};
+    onSave({ ...stage1Updates, ...form, stage2Files });
   }
 
   return (
     <Modal title={`Issue RFI to Client — Stage 2 (${rfi.rfiNo})`} onClose={onClose} size="lg">
-      {/* Stage 1 read-only summary */}
-      <div className="mb-4 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3">
-        <div className="text-xs font-bold text-slate-700 mb-2">Stage 1 (read-only)</div>
-        <div className="grid grid-cols-3 gap-x-6 gap-y-1.5 text-[10px] text-slate-600">
-          <div>Request No.: <span className="font-semibold text-slate-800">{rfi.requestNo}</span></div>
-          <div>
-            <span className="block mb-0.5">RFI No.:</span>
-            <Input value={form.rfiNo} onChange={set('rfiNo')} className="h-6 text-[10px] px-2 py-0" />
+      {/* Stage 1 summary — read-only or editable */}
+      <div className={`mb-4 rounded-xl px-4 py-3 border transition-colors ${editingStage1 ? 'bg-orange-50/60 border-orange-300' : 'bg-slate-50 border-slate-200'}`}>
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-xs font-bold text-slate-700">
+            Stage 1 {editingStage1 ? '(editing)' : '(read-only)'}
           </div>
-          <div>Type of Inspection: <span className="font-semibold text-slate-800">{rfi.typeOfInspection}</span></div>
-
-          <div>Request Date (Internal): <span className="font-semibold text-slate-800">{rfi.requestDateInternal || '—'}</span></div>
-          <div>Request Time (Internal): <span className="font-semibold text-slate-800">{rfi.requestTimeInternal || '—'}</span></div>
-          <div>Due Date: <span className="font-semibold text-slate-800">{rfi.dueDate || '—'}</span></div>
-
-          <div>Request Date (Owner): <span className="font-semibold text-slate-800">{rfi.requestDateOwner || '—'}</span></div>
-          <div>Request Time (Owner): <span className="font-semibold text-slate-800">{rfi.requestTimeOwner || '—'}</span></div>
-          <div>Requested By: <span className="font-semibold text-slate-800">{rfi.requestedBy || '—'}</span></div>
-
-          <div>Status Insp.: <span className="font-semibold text-slate-800">{rfi.statusInsp || '—'}</span></div>
-          <div>Status Doc: <span className="font-semibold text-slate-800">{rfi.statusDoc || '—'}</span></div>
-          <div>Working Step: <span className="font-semibold text-slate-800">{rfi.workingStep || '—'}</span></div>
-
-          <div>Location: <span className="font-semibold text-slate-800">{rfi.location || '—'}</span></div>
-          <div>Area: <span className="font-semibold text-slate-800">{rfi.area || '—'}</span></div>
-          <div className="col-span-3">
-            <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider block mt-1">Refer Drawing , Markup Drawing</span>
-            {Array.isArray(rfi.referDrawingFiles) && rfi.referDrawingFiles.length > 0 ? (
-              <div className="flex flex-wrap gap-1.5 mt-1">
-                {rfi.referDrawingFiles.slice(0, 6).map((file, i) => (
-                  <ReferDrawingThumb key={i} file={file} />
-                ))}
-                {rfi.referDrawingFiles.length > 6 && (
-                  <span className="text-[10px] text-slate-400">+{rfi.referDrawingFiles.length - 6} files</span>
-                )}
-              </div>
+          <button
+            type="button"
+            onClick={() => setEditingStage1(prev => !prev)}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-semibold transition-all ${
+              editingStage1
+                ? 'bg-green-100 text-green-700 hover:bg-green-200 border border-green-300'
+                : 'bg-white text-slate-500 hover:text-orange-600 hover:bg-orange-50 border border-slate-200 hover:border-orange-300'
+            }`}
+            title={editingStage1 ? 'จบการแก้ไข Stage 1' : 'แก้ไขข้อมูล Stage 1'}
+          >
+            {editingStage1 ? (
+              <><Check size={11} /> Done Editing</>
             ) : (
-              <span className="text-[10px] text-slate-500">{rfi.referDrawing || '—'}</span>
+              <><Pencil size={11} /> Edit Stage 1</>
+            )}
+          </button>
+        </div>
+
+        {editingStage1 ? (
+          /* ── Editable Stage 1 fields ── */
+          <div className="space-y-3">
+            <div className="grid grid-cols-3 gap-3">
+              <div className="flex flex-col gap-0.5">
+                <label className="text-[10px] font-semibold text-slate-500">Request No.</label>
+                <input className="w-full px-2 py-1.5 text-[11px] border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-400 text-slate-700 bg-white"
+                  value={stage1Form.requestNo} onChange={setS1('requestNo')} />
+              </div>
+              <div className="flex flex-col gap-0.5">
+                <label className="text-[10px] font-semibold text-slate-500">RFI No.</label>
+                <Input value={form.rfiNo} onChange={set('rfiNo')} className="h-7 text-[11px] px-2 py-0" />
+              </div>
+              <div className="flex flex-col gap-0.5">
+                <label className="text-[10px] font-semibold text-slate-500">Type of Inspection</label>
+                <input className="w-full px-2 py-1.5 text-[11px] border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-400 text-slate-700 bg-white"
+                  value={stage1Form.typeOfInspection} onChange={setS1('typeOfInspection')} />
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="flex flex-col gap-0.5">
+                <label className="text-[10px] font-semibold text-slate-500">Request Date (Internal)</label>
+                <input type="date" className="w-full px-2 py-1.5 text-[11px] border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-400 text-slate-700 bg-white"
+                  value={stage1Form.requestDateInternal} onChange={setS1('requestDateInternal')} />
+              </div>
+              <div className="flex flex-col gap-0.5">
+                <label className="text-[10px] font-semibold text-slate-500">Request Time (Internal)</label>
+                <input type="time" className="w-full px-2 py-1.5 text-[11px] border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-400 text-slate-700 bg-white"
+                  value={stage1Form.requestTimeInternal} onChange={setS1('requestTimeInternal')} />
+              </div>
+              <div className="flex flex-col gap-0.5">
+                <label className="text-[10px] font-semibold text-slate-500">Due Date</label>
+                <input type="date" className="w-full px-2 py-1.5 text-[11px] border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-400 text-slate-700 bg-white"
+                  value={stage1Form.dueDate} onChange={setS1('dueDate')} />
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="flex flex-col gap-0.5">
+                <label className="text-[10px] font-semibold text-slate-500">Request Date (Owner)</label>
+                <input type="date" className="w-full px-2 py-1.5 text-[11px] border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-400 text-slate-700 bg-white"
+                  value={stage1Form.requestDateOwner} onChange={setS1('requestDateOwner')} />
+              </div>
+              <div className="flex flex-col gap-0.5">
+                <label className="text-[10px] font-semibold text-slate-500">Request Time (Owner)</label>
+                <input type="time" className="w-full px-2 py-1.5 text-[11px] border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-400 text-slate-700 bg-white"
+                  value={stage1Form.requestTimeOwner} onChange={setS1('requestTimeOwner')} />
+              </div>
+              <div className="flex flex-col gap-0.5">
+                <label className="text-[10px] font-semibold text-slate-500">Requested By</label>
+                <input className="w-full px-2 py-1.5 text-[11px] border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-400 text-slate-700 bg-white"
+                  value={stage1Form.requestedBy} onChange={setS1('requestedBy')} />
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="flex flex-col gap-0.5">
+                <label className="text-[10px] font-semibold text-slate-500">Status Insp.</label>
+                <input className="w-full px-2 py-1.5 text-[11px] border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-400 text-slate-700 bg-white"
+                  value={stage1Form.statusInsp} onChange={setS1('statusInsp')} />
+              </div>
+              <div className="flex flex-col gap-0.5">
+                <label className="text-[10px] font-semibold text-slate-500">Status Doc</label>
+                <input className="w-full px-2 py-1.5 text-[11px] border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-400 text-slate-700 bg-white"
+                  value={stage1Form.statusDoc} onChange={setS1('statusDoc')} />
+              </div>
+              <div className="flex flex-col gap-0.5">
+                <label className="text-[10px] font-semibold text-slate-500">Working Step</label>
+                <input className="w-full px-2 py-1.5 text-[11px] border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-400 text-slate-700 bg-white"
+                  value={stage1Form.workingStep} onChange={setS1('workingStep')} />
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="flex flex-col gap-0.5">
+                <label className="text-[10px] font-semibold text-slate-500">Location</label>
+                <input className="w-full px-2 py-1.5 text-[11px] border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-400 text-slate-700 bg-white"
+                  value={stage1Form.location} onChange={setS1('location')} />
+              </div>
+              <div className="flex flex-col gap-0.5">
+                <label className="text-[10px] font-semibold text-slate-500">Area</label>
+                <input className="w-full px-2 py-1.5 text-[11px] border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-400 text-slate-700 bg-white"
+                  value={stage1Form.area} onChange={setS1('area')} />
+              </div>
+            </div>
+            <div className="flex flex-col gap-0.5">
+              <label className="text-[10px] font-semibold text-slate-500">Detail of Inspection</label>
+              <textarea className="w-full px-2 py-1.5 text-[11px] border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-400 text-slate-700 bg-white resize-none" rows={2}
+                value={stage1Form.detailInspection} onChange={setS1('detailInspection')} />
+            </div>
+
+            {/* Refer Drawing (read-only thumbnails — files not re-editable here) */}
+            {Array.isArray(rfi.referDrawingFiles) && rfi.referDrawingFiles.length > 0 && (
+              <div>
+                <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider block mb-1">Refer Drawing , Markup Drawing</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {rfi.referDrawingFiles.slice(0, 6).map((file, i) => (
+                    <ReferDrawingThumb key={i} file={file} />
+                  ))}
+                  {rfi.referDrawingFiles.length > 6 && (
+                    <span className="text-[10px] text-slate-400">+{rfi.referDrawingFiles.length - 6} files</span>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Concrete / Material (read-only) */}
+            {(rfi.brand || rfi.cementQty || rfi.cementUnit || rfi.concretePourDate) && (
+              <div>
+                <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider block mb-1">Concrete / Material</span>
+                <div className="flex flex-wrap gap-x-6 gap-y-1 bg-white border border-slate-200 rounded-lg px-3 py-2 text-[10px] text-slate-600">
+                  {rfi.concretePourDate && <div>วันที่เทคอนกรีต: <span className="font-semibold text-slate-800">{rfi.concretePourDate}</span></div>}
+                  {rfi.brand && <div>BRAND: <span className="font-semibold text-slate-800">{rfi.brand}</span></div>}
+                  {rfi.cementQty && <div>ปริมาณที่จองปูน: <span className="font-semibold text-slate-800">{rfi.cementQty}{rfi.cementUnit ? ` ${rfi.cementUnit}` : ''}</span></div>}
+                </div>
+              </div>
             )}
           </div>
-
-          <div className="col-span-3">
-            <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider block mt-1">Detail of Inspection</span>
-            <div className="text-[10px] text-slate-700 bg-white border border-slate-200 rounded-lg px-2 py-1 mt-1 whitespace-pre-wrap">
-              {rfi.detailInspection || '—'}
+        ) : (
+          /* ── Read-only Stage 1 display ── */
+          <div className="grid grid-cols-3 gap-x-6 gap-y-1.5 text-[10px] text-slate-600">
+            <div>Request No.: <span className="font-semibold text-slate-800">{rfi.requestNo}</span></div>
+            <div>
+              <span className="block mb-0.5">RFI No.:</span>
+              <Input value={form.rfiNo} onChange={set('rfiNo')} className="h-6 text-[10px] px-2 py-0" />
             </div>
-          </div>
+            <div>Type of Inspection: <span className="font-semibold text-slate-800">{rfi.typeOfInspection}</span></div>
 
-          {(rfi.brand || rfi.cementQty || rfi.cementUnit || rfi.concretePourDate) && (
-            <div className="col-span-3 mt-1">
-              <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider block mb-1">Concrete / Material</span>
-              <div className="flex flex-wrap gap-x-6 gap-y-1 bg-white border border-slate-200 rounded-lg px-3 py-2">
-                {rfi.concretePourDate && (
-                  <div>วันที่เทคอนกรีต: <span className="font-semibold text-slate-800">{rfi.concretePourDate}</span></div>
-                )}
-                {rfi.brand && (
-                  <div>BRAND: <span className="font-semibold text-slate-800">{rfi.brand}</span></div>
-                )}
-                {rfi.cementQty && (
-                  <div>ปริมาณที่จองปูน: <span className="font-semibold text-slate-800">{rfi.cementQty}{rfi.cementUnit ? ` ${rfi.cementUnit}` : ''}</span></div>
-                )}
+            <div>Request Date (Internal): <span className="font-semibold text-slate-800">{rfi.requestDateInternal || '—'}</span></div>
+            <div>Request Time (Internal): <span className="font-semibold text-slate-800">{rfi.requestTimeInternal || '—'}</span></div>
+            <div>Due Date: <span className="font-semibold text-slate-800">{rfi.dueDate || '—'}</span></div>
+
+            <div>Request Date (Owner): <span className="font-semibold text-slate-800">{rfi.requestDateOwner || '—'}</span></div>
+            <div>Request Time (Owner): <span className="font-semibold text-slate-800">{rfi.requestTimeOwner || '—'}</span></div>
+            <div>Requested By: <span className="font-semibold text-slate-800">{rfi.requestedBy || '—'}</span></div>
+
+            <div>Status Insp.: <span className="font-semibold text-slate-800">{rfi.statusInsp || '—'}</span></div>
+            <div>Status Doc: <span className="font-semibold text-slate-800">{rfi.statusDoc || '—'}</span></div>
+            <div>Working Step: <span className="font-semibold text-slate-800">{rfi.workingStep || '—'}</span></div>
+
+            <div>Location: <span className="font-semibold text-slate-800">{rfi.location || '—'}</span></div>
+            <div>Area: <span className="font-semibold text-slate-800">{rfi.area || '—'}</span></div>
+            <div className="col-span-3">
+              <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider block mt-1">Refer Drawing , Markup Drawing</span>
+              {Array.isArray(rfi.referDrawingFiles) && rfi.referDrawingFiles.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5 mt-1">
+                  {rfi.referDrawingFiles.slice(0, 6).map((file, i) => (
+                    <ReferDrawingThumb key={i} file={file} />
+                  ))}
+                  {rfi.referDrawingFiles.length > 6 && (
+                    <span className="text-[10px] text-slate-400">+{rfi.referDrawingFiles.length - 6} files</span>
+                  )}
+                </div>
+              ) : (
+                <span className="text-[10px] text-slate-500">{rfi.referDrawing || '—'}</span>
+              )}
+            </div>
+
+            <div className="col-span-3">
+              <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider block mt-1">Detail of Inspection</span>
+              <div className="text-[10px] text-slate-700 bg-white border border-slate-200 rounded-lg px-2 py-1 mt-1 whitespace-pre-wrap">
+                {rfi.detailInspection || '—'}
               </div>
             </div>
-          )}
-        </div>
+
+            {(rfi.brand || rfi.cementQty || rfi.cementUnit || rfi.concretePourDate) && (
+              <div className="col-span-3 mt-1">
+                <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider block mb-1">Concrete / Material</span>
+                <div className="flex flex-wrap gap-x-6 gap-y-1 bg-white border border-slate-200 rounded-lg px-3 py-2">
+                  {rfi.concretePourDate && (
+                    <div>วันที่เทคอนกรีต: <span className="font-semibold text-slate-800">{rfi.concretePourDate}</span></div>
+                  )}
+                  {rfi.brand && (
+                    <div>BRAND: <span className="font-semibold text-slate-800">{rfi.brand}</span></div>
+                  )}
+                  {rfi.cementQty && (
+                    <div>ปริมาณที่จองปูน: <span className="font-semibold text-slate-800">{rfi.cementQty}{rfi.cementUnit ? ` ${rfi.cementUnit}` : ''}</span></div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Previous Stage 3 inspection data (if RFI returned due to Comment) */}

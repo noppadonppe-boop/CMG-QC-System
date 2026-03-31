@@ -133,6 +133,7 @@ function DocRow({ doc, isLatest, isHistory, onEdit, onDelete, onDuplicate, rowIn
     }`}>
       <td className="px-4 py-2.5 text-slate-400 font-mono text-[11px]">{rowIndex}</td>
       <td className="px-4 py-2.5 font-mono text-slate-700 whitespace-nowrap text-[11px]">{doc.transmittalNo}</td>
+      <td className="px-4 py-2.5 font-mono text-slate-500 whitespace-nowrap text-[11px]">{doc.transmittalNoRef || '—'}</td>
       <td className="px-4 py-2.5 text-slate-600 whitespace-nowrap text-[11px]">{doc.transmittalDate || '—'}</td>
       <td className="px-4 py-2.5 text-slate-600 whitespace-nowrap text-[11px]">{doc.from || '—'}</td>
       <td className="px-4 py-2.5">
@@ -242,6 +243,7 @@ function DocGroup({ docNo, docs, latestId, showAllRevs, onEdit, onDelete, onDupl
       <tr className="group hover:bg-orange-50/40 transition-colors">
         <td className="px-4 py-2.5 text-slate-400 font-mono text-[11px]">{startIndex}</td>
         <td className="px-4 py-2.5 font-mono text-slate-700 whitespace-nowrap text-[11px]">{latestDoc?.transmittalNo}</td>
+        <td className="px-4 py-2.5 font-mono text-slate-500 whitespace-nowrap text-[11px]">{latestDoc?.transmittalNoRef || '—'}</td>
         <td className="px-4 py-2.5 text-slate-600 whitespace-nowrap text-[11px]">{latestDoc?.transmittalDate || '—'}</td>
         <td className="px-4 py-2.5 text-slate-600 whitespace-nowrap text-[11px]">{latestDoc?.from || '—'}</td>
         <td className="px-4 py-2.5">
@@ -396,12 +398,15 @@ export default function QcDocumentsPage() {
   const categories  = [...new Set(projectDocs.map(d => d.category))];
   const statuses    = [...new Set(projectDocs.map(d => d.status))];
 
-  function handleSave(form) {
+  function handleSave(formOrArray) {
     if (modalMode === 'edit') {
-      updateQcDocument(editTarget.id, form);
+      updateQcDocument(editTarget.id, formOrArray);
     } else {
-      // add or duplicate — both create a new record
-      addQcDocument({ ...form, id: `doc-${Date.now()}` });
+      // add or duplicate — supports single or multi-row
+      const forms = Array.isArray(formOrArray) ? formOrArray : [formOrArray];
+      forms.forEach((form, i) => {
+        addQcDocument({ ...form, id: `doc-${Date.now()}-${i}` });
+      });
     }
     setModalMode(null);
     setEditTarget(null);
@@ -529,7 +534,7 @@ export default function QcDocumentsPage() {
           <table className="w-full text-xs">
             <thead>
               <tr className="bg-slate-800 text-white">
-                {['#', 'Transmittal No.', 'Trans. Date', 'From', 'Type', 'Category', 'Document No.', 'Document Title', 'Receive Date', 'Revision', 'Status', 'Delivery', 'Attachments', (canDuplicateTransmittal || canAddTransmittal || canEditTransmittal || canDeleteTransmittal) ? 'Actions' : ''].filter(Boolean).map(h => (
+                {['#', 'Transmittal No.', 'Trans Ref', 'Trans. Date', 'From', 'Type', 'Category', 'Document No.', 'Document Title', 'Receive Date', 'Revision', 'Status', 'Delivery', 'Attachments', (canDuplicateTransmittal || canAddTransmittal || canEditTransmittal || canDeleteTransmittal) ? 'Actions' : ''].filter(Boolean).map(h => (
                   <th key={h} className="px-4 py-3 text-left font-semibold whitespace-nowrap text-[11px] tracking-wide">{h}</th>
                 ))}
               </tr>
@@ -537,7 +542,7 @@ export default function QcDocumentsPage() {
             <tbody className="divide-y divide-slate-50">
               {grouped.length === 0 && (
                 <tr>
-                  <td colSpan={14} className="px-4 py-12 text-center text-slate-400">
+                  <td colSpan={15} className="px-4 py-12 text-center text-slate-400">
                     No documents found for <span className="font-semibold">{selectedProject?.name}</span>.
                     {search || filterCat || filterStatus ? ' Try clearing filters.' : ''}
                   </td>
