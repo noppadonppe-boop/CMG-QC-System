@@ -73,10 +73,22 @@ const NAV_ITEMS = [
     roles: ['MD', 'CD', 'PM', 'QcDocCenter'],
   },
   {
-    id: 'markup-dwg',
-    label: 'Markup DWG',
+    id: 'markup',
+    label: 'Markup',
     icon: PencilRuler,
     roles: ['MD', 'CD', 'PM', 'QcDocCenter', 'SiteQcInspector'],
+    children: [
+      {
+        id: 'markup-dwg',
+        label: 'Markup DWG',
+        roles: ['MD', 'CD', 'PM', 'QcDocCenter', 'SiteQcInspector'],
+      },
+      {
+        id: 'markup-tag-id',
+        label: 'Markup Tag ID',
+        roles: ['MD', 'CD', 'PM', 'QcDocCenter', 'SiteQcInspector'],
+      },
+    ],
   },
   // admin-users ถูกควบคุมเพิ่มเติมด้านล่าง (MasterAdmin เท่านั้น)
 ];
@@ -92,6 +104,7 @@ export default function Sidebar({ activePage, setActivePage }) {
 
   const [rolePerms, setRolePerms] = useState({});
   const [avatarError, setAvatarError] = useState(false);
+  const [openGroups, setOpenGroups] = useState({ markup: activePage === 'markup-dwg' || activePage === 'markup-tag-id' });
 
   // reset error ทุกครั้งที่ photoURL เปลี่ยน
   useEffect(() => { setAvatarError(false); }, [userProfile?.photoURL]);
@@ -106,23 +119,38 @@ export default function Sidebar({ activePage, setActivePage }) {
     return () => unsub();
   }, []);
 
-  const visibleItems = NAV_ITEMS.filter(item => {
+  function hasReadPermission(itemId, fallbackIds = []) {
     if (!userProfile) return false;
 
-    // admin-users แสดงเฉพาะ MasterAdmin เสมอ
-    if (item.id === 'admin-users') {
+    if (itemId === 'admin-users') {
       return userRoles.includes('MasterAdmin');
     }
 
-    // ถ้าไม่มี config ใน rolePerms ให้ fallback ใช้ roles เดิม
     const hasConfig = Object.keys(rolePerms || {}).length > 0;
-    if (!hasConfig) {
-      if (isAdmin) return true;
+    if (!hasConfig) return true;
+
+    return userRoles.some(role => {
+      if (rolePerms?.[role]?.[itemId]?.read) return true;
+      return fallbackIds.some(fallbackId => !!rolePerms?.[role]?.[fallbackId]?.read);
+    });
+  }
+
+  useEffect(() => {
+    if (activePage === 'markup-dwg' || activePage === 'markup-tag-id') {
+      setOpenGroups(prev => ({ ...prev, markup: true }));
+    }
+  }, [activePage]);
+
+  const visibleItems = NAV_ITEMS.filter(item => {
+    if (!userProfile) return false;
+    if (item.children?.length) {
+      return item.children.some(child => hasReadPermission(child.id, ['markup-dwg']));
+    }
+    if (!Object.keys(rolePerms || {}).length && isAdmin) return true;
+    if (!Object.keys(rolePerms || {}).length) {
       return item.roles.some(r => userRoles.includes(r));
     }
-
-    // มี config แล้ว: เมนูจะแสดงถ้าอย่างน้อยหนึ่ง role มีสิทธิ์ read
-    return userRoles.some(role => !!rolePerms?.[role]?.[item.id]?.read);
+    return hasReadPermission(item.id);
   });
 
   // Build display info
@@ -140,6 +168,51 @@ export default function Sidebar({ activePage, setActivePage }) {
   function navBtn(item) {
     const Icon     = item.icon;
     const isActive = activePage === item.id;
+    const isGroupActive = item.children?.some(child => child.id === activePage);
+
+    if (item.children?.length) {
+      const isOpen = !!openGroups[item.id];
+      const visibleChildren = item.children.filter(child => hasReadPermission(child.id, ['markup-dwg']));
+      if (!visibleChildren.length) return null;
+      return (
+        <div key={item.id}>
+          <button
+            onClick={() => setOpenGroups(prev => ({ ...prev, [item.id]: !prev[item.id] }))}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 text-left transition-all duration-150 text-xs font-medium ${
+              isGroupActive
+                ? 'bg-orange-500/10 text-orange-400 border-r-2 border-orange-500'
+                : 'hover:bg-slate-800 hover:text-white text-slate-400'
+            }`}
+          >
+            <Icon size={16} className={isGroupActive ? 'text-orange-400' : 'text-slate-500'} />
+            <span className="leading-tight flex-1">{item.label}</span>
+            {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          </button>
+          {isOpen && (
+            <div className="ml-4 border-l border-slate-800 py-1">
+              {visibleChildren.map(child => {
+                const isChildActive = activePage === child.id;
+                return (
+                  <button
+                    key={child.id}
+                    onClick={() => setActivePage(child.id)}
+                    className={`w-full flex items-center gap-3 px-3 py-2 text-left transition-all duration-150 text-[11px] font-medium ${
+                      isChildActive
+                        ? 'text-orange-300 bg-orange-500/10'
+                        : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                    }`}
+                  >
+                    <span className={`h-1.5 w-1.5 rounded-full ${isChildActive ? 'bg-orange-400' : 'bg-slate-600'}`} />
+                    <span>{child.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      );
+    }
+
     return (
       <button
         key={item.id}

@@ -4,6 +4,7 @@ import { useApp }  from '../../context/AppContext';
 import { useAuth } from '../../auth/AuthContext';
 import { useMenuPermissions } from '../../auth/useMenuPermissions';
 import PunchModal from './PunchModal';
+import TableColumnVisibility from '../common/TableColumnVisibility';
 
 const STATUS_BADGE = {
   close:   'bg-green-100 text-green-700',
@@ -20,6 +21,20 @@ const CAT_BADGE = {
   D: 'bg-slate-100 text-slate-600',
 };
 const CAT_DESC = { A: 'Safety/Critical', B: 'Major', C: 'Minor', D: 'Cosmetic' };
+
+const PUNCH_TABLE_COLUMNS = [
+  { key: 'row', label: '#' },
+  { key: 'punchNo', label: 'Punch No.' },
+  { key: 'category', label: 'Cat.' },
+  { key: 'description', label: 'Description' },
+  { key: 'area', label: 'Area / Location' },
+  { key: 'openDate', label: 'Open Date' },
+  { key: 'inspectionDate', label: 'Insp. Date' },
+  { key: 'status', label: 'Status' },
+  { key: 'note', label: 'Note' },
+  { key: 'photo', label: 'Photo' },
+  { key: 'actions', label: 'Actions', locked: true },
+];
 
 function ConfirmDelete({ item, onConfirm, onCancel }) {
   return (
@@ -186,9 +201,14 @@ export default function PunchListPage() {
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+      <TableColumnVisibility
+        storageKey="punch-table-columns"
+        tableId="punch-table"
+        columns={PUNCH_TABLE_COLUMNS}
+        className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden p-4 pt-3"
+      >
         <div className="overflow-x-auto">
-          <table className="w-full text-xs">
+          <table data-column-table="punch-table" className="w-full text-xs">
             <thead>
               <tr className="bg-slate-800 text-white">
                 {['#', 'Punch No.', 'Cat.', 'Description', 'Area / Location', 'Open Date', 'Insp. Date', 'Status', 'Note', 'Photo', (canEditPunch || canDeletePunch) ? 'Actions' : ''].filter(Boolean).map(h => (
@@ -259,7 +279,7 @@ export default function PunchListPage() {
             </div>
           </div>
         )}
-      </div>
+      </TableColumnVisibility>
 
       {(modalMode === 'add' || modalMode === 'edit') && (
         <PunchModal item={modalMode === 'edit' ? editTarget : null} onSave={handleSave} onClose={() => { setModalMode(null); setEditTarget(null); }} />

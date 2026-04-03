@@ -1,23 +1,62 @@
 import { useState } from 'react';
-import { Plus, Pencil, Trash2, Search, ExternalLink, Package, CheckCircle2, XCircle, Clock, PauseCircle, FileCheck, History } from 'lucide-react';
+import { Plus, Pencil, Trash2, Search, Package, CheckCircle2, XCircle, Clock, PauseCircle, FileCheck, History } from 'lucide-react';
 import { useApp }  from '../../context/AppContext';
 import { useAuth } from '../../auth/AuthContext';
 import { useMenuPermissions } from '../../auth/useMenuPermissions';
 import MaterialModal from './MaterialModal';
 import MaterialApproveModal from './MaterialApproveModal';
+import TableColumnVisibility from '../common/TableColumnVisibility';
 
 const RESULT_BADGE = {
-  'Pass':    'bg-green-100 text-green-700',
-  'Reject':  'bg-red-100 text-red-700',
-  'Pending': 'bg-slate-100 text-slate-500',
-  'Hold':    'bg-amber-100 text-amber-700',
+  'Approved (AP)': 'bg-green-100 text-green-700',
+  'Approved with Comments (AC)': 'bg-teal-100 text-teal-700',
+  'Not Approved (NA)': 'bg-red-100 text-red-700',
+  'Reviewed with No Comment (RN)': 'bg-blue-100 text-blue-700',
+  'Reviewed with Comments (RC)': 'bg-amber-100 text-amber-700',
 };
 const RESULT_ICON = {
-  'Pass':    <CheckCircle2 size={13} className="text-green-500" />,
-  'Reject':  <XCircle size={13} className="text-red-500" />,
-  'Pending': <Clock size={13} className="text-slate-400" />,
-  'Hold':    <PauseCircle size={13} className="text-amber-500" />,
+  'Approved (AP)': <CheckCircle2 size={13} className="text-green-500" />,
+  'Approved with Comments (AC)': <CheckCircle2 size={13} className="text-teal-500" />,
+  'Not Approved (NA)': <XCircle size={13} className="text-red-500" />,
+  'Reviewed with No Comment (RN)': <Clock size={13} className="text-blue-500" />,
+  'Reviewed with Comments (RC)': <PauseCircle size={13} className="text-amber-500" />,
 };
+
+const MATERIAL_RESULT_OPTIONS = [
+  'Approved (AP)',
+  'Approved with Comments (AC)',
+  'Not Approved (NA)',
+  'Reviewed with No Comment (RN)',
+  'Reviewed with Comments (RC)',
+];
+
+const MATERIAL_TABLE_COLUMNS = [
+  { key: 'row', label: '#' },
+  { key: 'transmittalNo', label: 'TRANSMITTAL NO' },
+  { key: 'mapNo', label: 'MAP NO.' },
+  { key: 'documentTitle', label: 'DOCUMENT TITLE' },
+  { key: 'documentStatus', label: 'DOCUMENT STATUS' },
+  { key: 'rev', label: 'REV' },
+  { key: 'issueDate', label: 'Issue Date' },
+  { key: 'status', label: 'STATUS' },
+  { key: 'mar', label: 'MAR' },
+  { key: 'approve', label: 'Material Approve' },
+  { key: 'actions', label: 'Actions', locked: true },
+];
+
+const MATERIAL_APPROVAL_TABLE_COLUMNS = [
+  { key: 'row', label: '#' },
+  { key: 'matRevNo', label: 'Material Rev. No.' },
+  { key: 'description', label: 'Description' },
+  { key: 'approvalType', label: 'Approval Type' },
+  { key: 'approvedQty', label: 'Approved Qty' },
+  { key: 'result', label: 'Result' },
+  { key: 'approvedBy', label: 'Approved By' },
+  { key: 'date', label: 'Date' },
+  { key: 'version', label: 'Version' },
+  { key: 'documents', label: 'Documents' },
+  { key: 'comments', label: 'Comments' },
+];
 
 function ConfirmDelete({ item, onConfirm, onCancel }) {
   return (
@@ -68,8 +107,11 @@ export default function MaterialsPage() {
 
   const filtered = projectItems.filter(m => {
     const matchSearch = !search ||
-      m.matRevNo.toLowerCase().includes(search.toLowerCase()) ||
-      m.description.toLowerCase().includes(search.toLowerCase()) ||
+      (m.matRevNo || '').toLowerCase().includes(search.toLowerCase()) ||
+      (m.documentNo || '').toLowerCase().includes(search.toLowerCase()) ||
+      (m.description || '').toLowerCase().includes(search.toLowerCase()) ||
+      (m.materialReceived || '').toLowerCase().includes(search.toLowerCase()) ||
+      (m.linkedRfiLabel || '').toLowerCase().includes(search.toLowerCase()) ||
       (m.supplier || '').toLowerCase().includes(search.toLowerCase());
     const matchResult = !filterResult || m.result === filterResult;
     const matchCat    = !filterCat    || m.category === filterCat;
@@ -77,6 +119,19 @@ export default function MaterialsPage() {
   });
 
   const categories = [...new Set(projectItems.map(m => m.category).filter(Boolean))];
+
+  function getApprovalStatus(item) {
+    const totalQuantity = parseFloat(item.quantity) || 0;
+    const approvedQuantity = (item.approvals || []).reduce((sum, approval) => {
+      return sum + (parseFloat(approval.approvedQuantity) || 0);
+    }, 0);
+
+    if (!item.approvals?.length) return { label: 'Pending', className: 'bg-slate-100 text-slate-600' };
+    if (totalQuantity > 0 && approvedQuantity >= totalQuantity) {
+      return { label: 'Complete', className: 'bg-green-100 text-green-700' };
+    }
+    return { label: 'Partial', className: 'bg-amber-100 text-amber-700' };
+  }
 
   function handleSave(form) {
     if (modalMode === 'add') {
@@ -99,10 +154,11 @@ export default function MaterialsPage() {
 
   const counts = {
     total:   projectItems.length,
-    pass:    projectItems.filter(m => m.result === 'Pass').length,
-    reject:  projectItems.filter(m => m.result === 'Reject').length,
-    pending: projectItems.filter(m => m.result === 'Pending').length,
-    hold:    projectItems.filter(m => m.result === 'Hold').length,
+    approved: projectItems.filter(m => m.result === 'Approved (AP)').length,
+    approvedWithComments: projectItems.filter(m => m.result === 'Approved with Comments (AC)').length,
+    notApproved: projectItems.filter(m => m.result === 'Not Approved (NA)').length,
+    reviewedNoComment: projectItems.filter(m => m.result === 'Reviewed with No Comment (RN)').length,
+    reviewedWithComments: projectItems.filter(m => m.result === 'Reviewed with Comments (RC)').length,
   };
 
   return (
@@ -157,10 +213,10 @@ export default function MaterialsPage() {
           <div className="grid grid-cols-5 gap-3">
             {[
               { label: 'Total',   value: counts.total,   color: 'text-slate-700',  bg: 'bg-slate-100', icon: <Package size={16} className="text-slate-500" /> },
-              { label: 'Pass',    value: counts.pass,    color: 'text-green-700',  bg: 'bg-green-50',  icon: <CheckCircle2 size={16} className="text-green-500" /> },
-              { label: 'Reject',  value: counts.reject,  color: 'text-red-700',    bg: 'bg-red-50',    icon: <XCircle size={16} className="text-red-500" /> },
-              { label: 'Pending', value: counts.pending, color: 'text-slate-600',  bg: 'bg-slate-50',  icon: <Clock size={16} className="text-slate-400" /> },
-              { label: 'Hold',    value: counts.hold,    color: 'text-amber-700',  bg: 'bg-amber-50',  icon: <PauseCircle size={16} className="text-amber-500" /> },
+              { label: 'Approved', value: counts.approved, color: 'text-green-700', bg: 'bg-green-50', icon: <CheckCircle2 size={16} className="text-green-500" /> },
+              { label: 'Approved Cmt.', value: counts.approvedWithComments, color: 'text-teal-700', bg: 'bg-teal-50', icon: <CheckCircle2 size={16} className="text-teal-500" /> },
+              { label: 'Not Approved', value: counts.notApproved, color: 'text-red-700', bg: 'bg-red-50', icon: <XCircle size={16} className="text-red-500" /> },
+              { label: 'Reviewed', value: counts.reviewedNoComment + counts.reviewedWithComments, color: 'text-blue-700', bg: 'bg-blue-50', icon: <Clock size={16} className="text-blue-500" /> },
             ].map(s => (
               <div key={s.label} className="bg-white rounded-xl p-3 shadow-sm border border-slate-100 flex items-center gap-3">
                 <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${s.bg}`}>
@@ -180,7 +236,7 @@ export default function MaterialsPage() {
           <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
             className="text-xs pl-8 pr-3 py-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-teal-400 w-64 text-slate-700 placeholder-slate-400"
-            placeholder="Search by Rev No., description, supplier…"
+            placeholder="Search by transmittal no., document title, MAR…"
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
@@ -191,7 +247,7 @@ export default function MaterialsPage() {
           onChange={e => setFilterResult(e.target.value)}
         >
           <option value="">All Results</option>
-          {['Pass', 'Reject', 'Pending', 'Hold'].map(r => <option key={r}>{r}</option>)}
+          {MATERIAL_RESULT_OPTIONS.map(r => <option key={r}>{r}</option>)}
         </select>
         {categories.length > 0 && (
           <select
@@ -207,12 +263,17 @@ export default function MaterialsPage() {
           </div>
 
           {/* Table */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+      <TableColumnVisibility
+        storageKey="materials-table-columns"
+        tableId="materials-table"
+        columns={MATERIAL_TABLE_COLUMNS}
+        className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden p-4 pt-3"
+      >
         <div className="overflow-x-auto">
-          <table className="w-full text-xs">
+          <table data-column-table="materials-table" className="w-full text-xs">
             <thead>
               <tr className="bg-slate-800 text-white">
-                {['#', 'Mat. Rev. No.', 'Receive Date', 'Category', 'Description', 'Supplier', 'Qty / Unit', 'Spec / Package', 'Test Doc', 'Result', 'Note', 'Material Approve', (canEditMaterial || canDeleteMaterial) ? 'Actions' : ''].filter(Boolean).map(h => (
+                {['#', 'TRANSMITTAL NO', 'MAP NO.', 'DOCUMENT TITLE', 'DOCUMENT STATUS', 'REV', 'Issue Date', 'STATUS', 'MAR', 'Material Approve', (canEditMaterial || canDeleteMaterial) ? 'Actions' : ''].filter(Boolean).map(h => (
                   <th key={h} className="px-4 py-3 text-left font-semibold whitespace-nowrap text-[11px] tracking-wide">{h}</th>
                 ))}
               </tr>
@@ -220,7 +281,7 @@ export default function MaterialsPage() {
             <tbody className="divide-y divide-slate-50">
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={13} className="px-4 py-12 text-center text-slate-400">
+                  <td colSpan={11} className="px-4 py-12 text-center text-slate-400">
                     No material records for <span className="font-semibold">{selectedProject?.name}</span>.
                   </td>
                 </tr>
@@ -228,34 +289,10 @@ export default function MaterialsPage() {
               {filtered.map((item, idx) => (
                 <tr key={item.id} className="hover:bg-slate-50 transition-colors group">
                   <td className="px-4 py-3 text-slate-400 font-mono text-[11px]">{idx + 1}</td>
-                  <td className="px-4 py-3 font-mono font-bold text-teal-700 whitespace-nowrap">{item.matRevNo}</td>
-                  <td className="px-4 py-3 text-slate-600 whitespace-nowrap font-mono text-[11px]">{item.receiveDate || '—'}</td>
-                  <td className="px-4 py-3">
-                    <span className="text-[11px] bg-slate-100 text-slate-600 font-medium px-2 py-0.5 rounded-full whitespace-nowrap">
-                      {item.category || '—'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 font-semibold text-slate-800 max-w-[200px]">
+                  <td className="px-4 py-3 font-mono font-bold text-teal-700 whitespace-nowrap">{item.matRevNo || '—'}</td>
+                  <td className="px-4 py-3 text-slate-600 whitespace-nowrap font-mono text-[11px]">{item.documentNo || '—'}</td>
+                  <td className="px-4 py-3 font-semibold text-slate-800 max-w-[260px]">
                     <div className="truncate" title={item.description}>{item.description}</div>
-                  </td>
-                  <td className="px-4 py-3 text-slate-500 whitespace-nowrap">{item.supplier || '—'}</td>
-                  <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
-                    {item.quantity ? `${item.quantity} ${item.unit || ''}`.trim() : '—'}
-                  </td>
-                  <td className="px-4 py-3 text-slate-500 font-mono text-[11px] whitespace-nowrap">{item.materialSpecPackage || '—'}</td>
-                  <td className="px-4 py-3">
-                    {item.includeTestResult ? (
-                      item.testCertLink ? (
-                        <a href={item.testCertLink} target="_blank" rel="noopener noreferrer"
-                          className="flex items-center gap-1 text-[11px] text-blue-600 hover:text-blue-800 whitespace-nowrap">
-                          <ExternalLink size={11} /> View
-                        </a>
-                      ) : (
-                        <span className="text-[11px] text-green-600 font-medium">✓ Included</span>
-                      )
-                    ) : (
-                      <span className="text-[11px] text-slate-300">—</span>
-                    )}
                   </td>
                   <td className="px-4 py-3">
                     <span className={`flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full w-fit whitespace-nowrap ${RESULT_BADGE[item.result] || 'bg-slate-100 text-slate-500'}`}>
@@ -263,8 +300,22 @@ export default function MaterialsPage() {
                       {item.result}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-slate-500 max-w-[200px]">
-                    <div className="text-[11px] truncate" title={item.noteOfTest}>{item.noteOfTest || '—'}</div>
+                  <td className="px-4 py-3 text-slate-600 whitespace-nowrap font-mono text-[11px]">{item.rev || '—'}</td>
+                  <td className="px-4 py-3 text-slate-600 whitespace-nowrap font-mono text-[11px]">{item.receiveDate || '—'}</td>
+                  <td className="px-4 py-3">
+                    {(() => {
+                      const approvalStatus = getApprovalStatus(item);
+                      return (
+                        <span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold whitespace-nowrap ${approvalStatus.className}`}>
+                          {approvalStatus.label}
+                        </span>
+                      );
+                    })()}
+                  </td>
+                  <td className="px-4 py-3 text-slate-500 max-w-[220px]">
+                    <div className="truncate" title={item.linkedRfiLabel || item.materialReceived}>
+                      {item.linkedRfiLabel || item.materialReceived || '—'}
+                    </div>
                   </td>
                   <td className="px-4 py-3">
                     {(() => {
@@ -333,13 +384,15 @@ export default function MaterialsPage() {
               {(search || filterResult || filterCat) && ` (filtered from ${projectItems.length})`}
             </span>
             <div className="flex items-center gap-3 text-[11px]">
-              <span className="text-green-600 font-semibold">✅ {counts.pass} Pass</span>
-              <span className="text-red-600 font-semibold">❌ {counts.reject} Reject</span>
-              <span className="text-amber-600 font-semibold">⏸ {counts.hold} Hold</span>
+              <span className="text-green-600 font-semibold">✅ {counts.approved} AP</span>
+              <span className="text-teal-600 font-semibold">💬 {counts.approvedWithComments} AC</span>
+              <span className="text-red-600 font-semibold">❌ {counts.notApproved} NA</span>
+              <span className="text-blue-600 font-semibold">📝 {counts.reviewedNoComment} RN</span>
+              <span className="text-amber-600 font-semibold">🗨 {counts.reviewedWithComments} RC</span>
             </div>
           </div>
-          )}
-          </div>
+        )}
+      </TableColumnVisibility>
         </>
       )}
 
@@ -367,9 +420,14 @@ export default function MaterialsPage() {
           </div>
 
           {/* Approval Log Table */}
-          <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+          <TableColumnVisibility
+            storageKey="materials-approval-table-columns"
+            tableId="materials-approval-table"
+            columns={MATERIAL_APPROVAL_TABLE_COLUMNS}
+            className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden p-4 pt-3"
+          >
             <div className="overflow-x-auto">
-              <table className="w-full text-xs">
+              <table data-column-table="materials-approval-table" className="w-full text-xs">
                 <thead>
                   <tr className="bg-slate-800 text-white">
                     {['#', 'Material Rev. No.', 'Description', 'Approval Type', 'Approved Qty', 'Result', 'Approved By', 'Date', 'Version', 'Documents', 'Comments'].map(h => (
@@ -472,7 +530,7 @@ export default function MaterialsPage() {
                 </tbody>
               </table>
             </div>
-          </div>
+          </TableColumnVisibility>
         </>
       )}
 

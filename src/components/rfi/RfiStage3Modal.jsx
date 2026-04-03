@@ -7,7 +7,7 @@ import {
 import Modal from '../common/Modal';
 import { FormField, Input, Select, Textarea, FormGrid } from '../common/FormField';
 import { storage } from '../../config/firebase';
-import { Upload, X, Loader2, FileText, FileSpreadsheet, Image } from 'lucide-react';
+import { Upload, X, Loader2, FileText, FileSpreadsheet, Image, Camera } from 'lucide-react';
 import { useMenuPermissions } from '../../auth/useMenuPermissions';
 
 const RESULT_OPTIONS = ['Pass', 'Reject', 'Comment', 'Pass with comment'];
@@ -20,12 +20,40 @@ const S3_MIME = [
 ];
 const S3_EXT = '.pdf,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.webp';
 const S3_MAX_MB = 20;
+const CEMENT_BILL_MIME = ['application/pdf', 'image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+const CEMENT_BILL_EXT = '.pdf,.jpg,.jpeg,.png,.gif,.webp';
+const CEMENT_BILL_MAX_MB = 10;
 
 function s3FileIcon(name = '') {
   const ext = name.split('.').pop()?.toLowerCase();
   if (['xls', 'xlsx'].includes(ext)) return <FileSpreadsheet size={12} className="text-emerald-600 shrink-0" />;
   if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) return <Image size={12} className="text-green-500 shrink-0" />;
   return <FileText size={12} className="text-orange-500 shrink-0" />;
+}
+
+function isImageFile(name = '') {
+  const ext = name.split('.').pop()?.toLowerCase();
+  return ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext);
+}
+
+function CementBillThumb({ file, onPreview }) {
+  const isImage = isImageFile(file.name);
+  return (
+    <button
+      type="button"
+      onClick={() => isImage ? onPreview(file.url) : window.open(file.url, '_blank')}
+      className="flex flex-col items-center gap-0.5 p-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 hover:border-purple-300 transition-colors w-16 shrink-0 text-left"
+    >
+      {isImage ? (
+        <img src={file.url} alt="" className="w-12 h-12 object-cover rounded border border-slate-200" />
+      ) : (
+        <div className="w-12 h-12 rounded border border-slate-200 bg-white flex items-center justify-center">
+          <FileText size={18} className="text-purple-500" />
+        </div>
+      )}
+      <span className="text-[9px] text-slate-600 truncate w-full text-center" title={file.name}>{file.name}</span>
+    </button>
+  );
 }
 
 function Stage3Uploader({ label, files, setFiles, projectId, requestNo, folder, disabled }) {
@@ -123,22 +151,95 @@ export default function RfiStage3Modal({ rfi, onSave, onClose }) {
     result:           rfi.result           || '',
     stage3Note:       rfi.stage3Note       || '',
     stage3Attachment: rfi.stage3Attachment || '',
+    concretePourDate: rfi.concretePourDate || '',
+    brand:            rfi.brand || '',
+    cementQty:        rfi.cementQty || '',
+    cementUnit:       rfi.cementUnit || '',
+    cementBillLink:   rfi.cementBillLink || '',
+    status7Day:       rfi.status7Day || '',
+    status28Day:      rfi.status28Day || '',
+    steelTestResult:  rfi.steelTestResult || '',
+    soilTestResult:   rfi.soilTestResult || '',
   });
 
   const [inspectorFiles, setInspectorFiles] = useState(
     Array.isArray(rfi.stage3InspectorFiles) ? rfi.stage3InspectorFiles : [],
   );
+  const [cementBillFiles, setCementBillFiles] = useState(
+    Array.isArray(rfi.cementBillFiles) ? rfi.cementBillFiles : [],
+  );
+  const cementBillCameraRef = useRef(null);
+  const cementBillGalleryRef = useRef(null);
+  const [cementBillUploading, setCementBillUploading] = useState(false);
+  const [cementBillProgress, setCementBillProgress] = useState(0);
+  const [cementBillError, setCementBillError] = useState('');
+  const [cementBillPreviewUrl, setCementBillPreviewUrl] = useState(null);
 
   const set = (field) => (e) => setForm(f => ({ ...f, [field]: e.target.value }));
+
+  async function handleCementBillFiles(fileList) {
+    if (!rfi.projectId || !rfi.requestNo?.trim()) {
+      setCementBillError('ไม่พบ Project/Request No — กรุณารีโหลดหน้าแล้วลองใหม่');
+      return;
+    }
+    setCementBillError('');
+    setCementBillUploading(true);
+    try {
+      const safeReq = rfi.requestNo.replace(/[/\\#?]/g, '-');
+      const results = [];
+      for (let i = 0; i < fileList.length; i++) {
+        const file = fileList[i];
+        if (!CEMENT_BILL_MIME.includes(file.type)) {
+          setCementBillError(`"${file.name}" ไม่รองรับ — ใช้ได้เฉพาะรูปภาพหรือ PDF`);
+          continue;
+        }
+        if (file.size > CEMENT_BILL_MAX_MB * 1024 * 1024) {
+          setCementBillError(`"${file.name}" มีขนาดเกิน ${CEMENT_BILL_MAX_MB} MB`);
+          continue;
+        }
+        const seq = cementBillFiles.length + results.length + 1;
+        const ext = file.name.split('.').pop();
+        const path = `rfi-cement-bills/${rfi.projectId}/${safeReq}/bill_${String(seq).padStart(2, '0')}.${ext}`;
+        const sRef = storageRef(storage, path);
+        const task = uploadBytesResumable(sRef, file);
+        await new Promise((resolve, reject) => {
+          task.on('state_changed',
+            snap => setCementBillProgress(Math.round((snap.bytesTransferred / snap.totalBytes) * 100)),
+            reject,
+            () => resolve(),
+          );
+        });
+        const url = await getDownloadURL(task.snapshot.ref);
+        results.push({ name: file.name, url });
+      }
+      setCementBillFiles(prev => [...prev, ...results]);
+    } catch (err) {
+      setCementBillError(err?.message ?? 'อัปโหลดบิลปูนไม่สำเร็จ');
+    } finally {
+      setCementBillUploading(false);
+      setCementBillProgress(0);
+      if (cementBillCameraRef.current) cementBillCameraRef.current.value = '';
+      if (cementBillGalleryRef.current) cementBillGalleryRef.current.value = '';
+    }
+  }
+
+  function removeCementBillFile(idx) {
+    setCementBillFiles(prev => prev.filter((_, i) => i !== idx));
+  }
 
   function handleSubmit(e) {
     e.preventDefault();
     if (!form.inspectionDate || !form.result) return;
-    onSave({ ...form, stage3InspectorFiles: inspectorFiles });
+    onSave({
+      ...form,
+      stage3InspectorFiles: inspectorFiles,
+      cementBillFiles,
+      cementBillLink: cementBillFiles[0]?.url ?? form.cementBillLink ?? '',
+    });
   }
 
   return (
-    <Modal title={`Onsite Inspection — Stage 3 (${rfi.rfiNo})`} onClose={onClose} size="md">
+    <Modal title={`Onsite Inspection — Stage 3 (${rfi.rfiNo})`} onClose={onClose} size="lg">
       <div className="mb-5 bg-purple-50 border border-purple-100 rounded-xl px-4 py-3 flex items-start gap-3">
         <div className="w-8 h-8 rounded-lg bg-purple-600 flex items-center justify-center shrink-0 mt-0.5">
           <span className="text-white text-xs font-bold">S3</span>
@@ -246,6 +347,129 @@ export default function RfiStage3Modal({ rfi, onSave, onClose }) {
           />
         </FormField>
 
+        <div className="bg-slate-50 rounded-xl p-4 border border-slate-100">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-5 h-5 rounded-full bg-slate-400 text-white flex items-center justify-center text-[10px] font-bold shrink-0">6</div>
+            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Concrete / Material Test (if applicable)</h3>
+          </div>
+          <FormGrid cols={4}>
+            <FormField label="วันที่เทคอนกรีต">
+              <Input type="date" value={form.concretePourDate} onChange={set('concretePourDate')} />
+            </FormField>
+            <FormField label="BRAND (ปูนซีเมนต์)">
+              <Input value={form.brand} onChange={set('brand')} placeholder="TPI / SCG..." />
+            </FormField>
+            <FormField label="ปริมาณที่จองปูน">
+              <Input
+                type="number"
+                min="0"
+                step="any"
+                value={form.cementQty}
+                onChange={set('cementQty')}
+                placeholder="0"
+              />
+            </FormField>
+            <FormField label="หน่วย">
+              <Input value={form.cementUnit} onChange={set('cementUnit')} placeholder="ลบ.ม. / ถุง..." />
+            </FormField>
+          </FormGrid>
+          <div className="mt-4">
+            <FormField label="แนบลิงค์บิลปูน">
+              <div className="space-y-2">
+                {cementBillFiles.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {cementBillFiles.map((file, i) => (
+                      <div key={i} className="relative group">
+                        <CementBillThumb file={file} onPreview={setCementBillPreviewUrl} />
+                        <button
+                          type="button"
+                          onClick={() => removeCementBillFile(i)}
+                          className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <X size={10} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  <input
+                    ref={cementBillCameraRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    className="hidden"
+                    onChange={e => e.target.files && handleCementBillFiles(e.target.files)}
+                  />
+                  <input
+                    ref={cementBillGalleryRef}
+                    type="file"
+                    accept={CEMENT_BILL_EXT}
+                    multiple
+                    className="hidden"
+                    onChange={e => e.target.files && handleCementBillFiles(e.target.files)}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => cementBillCameraRef.current?.click()}
+                    disabled={cementBillUploading}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium text-slate-600 border border-slate-300 rounded-lg hover:border-purple-400 hover:text-purple-600 disabled:opacity-60"
+                  >
+                    <Camera size={12} /> ถ่ายรูป
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => cementBillGalleryRef.current?.click()}
+                    disabled={cementBillUploading}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium text-slate-600 border border-dashed border-slate-300 rounded-lg hover:border-purple-400 hover:text-purple-600 disabled:opacity-60"
+                  >
+                    {cementBillUploading ? (
+                      <>
+                        <Loader2 size={12} className="animate-spin" /> {cementBillProgress}%
+                      </>
+                    ) : (
+                      <>
+                        <Upload size={12} /> แกลลอรี่ / ไฟล์ (รูปหรือ PDF)
+                      </>
+                    )}
+                  </button>
+                </div>
+                {cementBillError && (
+                  <p className="text-[11px] text-red-500 flex items-center gap-1">
+                    <X size={11} /> {cementBillError}
+                  </p>
+                )}
+              </div>
+            </FormField>
+          </div>
+          <FormGrid cols={4} className="mt-4">
+            <FormField label="Status 7 Day">
+              <Select value={form.status7Day} onChange={set('status7Day')}>
+                <option value="">—</option>
+                <option>Pass</option><option>Fail</option><option>Pending</option>
+              </Select>
+            </FormField>
+            <FormField label="Status 28 Day">
+              <Select value={form.status28Day} onChange={set('status28Day')}>
+                <option value="">—</option>
+                <option>Pass</option><option>Fail</option><option>Pending</option>
+              </Select>
+            </FormField>
+            <FormField label="ผลเทสเหล็ก">
+              <Select value={form.steelTestResult} onChange={set('steelTestResult')}>
+                <option value="">—</option>
+                <option>Pass</option><option>Fail</option><option>N/A</option><option>Pending</option>
+              </Select>
+            </FormField>
+            <FormField label="ผลเทสดิน">
+              <Select value={form.soilTestResult} onChange={set('soilTestResult')}>
+                <option value="">—</option>
+                <option>Pass</option><option>Fail</option><option>N/A</option><option>Pending</option>
+              </Select>
+            </FormField>
+          </FormGrid>
+        </div>
+
         <div className="flex justify-end gap-3 pt-2 border-t border-slate-100">
           <button type="button" onClick={onClose}
             className="px-4 py-2 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
@@ -257,6 +481,27 @@ export default function RfiStage3Modal({ rfi, onSave, onClose }) {
           </button>
         </div>
       </form>
+
+      {cementBillPreviewUrl && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4"
+          onClick={() => setCementBillPreviewUrl(null)}
+        >
+          <button
+            type="button"
+            onClick={() => setCementBillPreviewUrl(null)}
+            className="absolute top-4 right-4 w-8 h-8 rounded-full bg-white/90 text-slate-800 flex items-center justify-center"
+          >
+            <X size={18} />
+          </button>
+          <img
+            src={cementBillPreviewUrl}
+            alt="Preview"
+            className="max-w-full max-h-[90vh] object-contain rounded"
+            onClick={e => e.stopPropagation()}
+          />
+        </div>
+      )}
     </Modal>
   );
 }

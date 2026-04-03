@@ -4,6 +4,7 @@ import { useApp }  from '../../context/AppContext';
 import { useAuth } from '../../auth/AuthContext';
 import { useMenuPermissions } from '../../auth/useMenuPermissions';
 import ItpModal from './ItpModal';
+import TableColumnVisibility from '../common/TableColumnVisibility';
 
 const ITP_BY_COLORS = {
   'Client ITP': 'bg-blue-100 text-blue-700',
@@ -19,6 +20,18 @@ const TYPE_COLORS = {
   'HVAC':            'bg-cyan-100 text-cyan-700',
   'Sanitary':        'bg-indigo-100 text-indigo-700',
 };
+
+const ITP_TABLE_COLUMNS = [
+  { key: 'row', label: '#' },
+  { key: 'item', label: 'ITP Item / Description' },
+  { key: 'itpBy', label: 'ITP By' },
+  { key: 'typeItc', label: 'Type ITC' },
+  { key: 'docNo', label: 'Doc. No.' },
+  { key: 'rev', label: 'Rev.' },
+  { key: 'attachment', label: 'Attachment' },
+  { key: 'note', label: 'Note' },
+  { key: 'actions', label: 'Actions', locked: true },
+];
 
 function ConfirmDelete({ item, onConfirm, onCancel }) {
   return (
@@ -161,9 +174,14 @@ export default function ItpPage() {
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+      <TableColumnVisibility
+        storageKey="itp-table-columns"
+        tableId="itp-table"
+        columns={ITP_TABLE_COLUMNS}
+        className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden p-4 pt-3"
+      >
         <div className="overflow-x-auto">
-          <table className="w-full text-xs">
+          <table data-column-table="itp-table" className="w-full text-xs">
             <thead>
               <tr className="bg-slate-800 text-white">
                 {['#', 'ITP Item / Description', 'ITP By', 'Type ITC', 'Doc. No.', 'Rev.', 'Attachment', 'Note', (canEditItp || canDeleteItp) ? 'Actions' : ''].filter(Boolean).map(h => (
@@ -254,7 +272,7 @@ export default function ItpPage() {
             </tbody>
           </table>
         </div>
-      </div>
+      </TableColumnVisibility>
 
       {(modalMode === 'add' || modalMode === 'edit') && (
         <ItpModal

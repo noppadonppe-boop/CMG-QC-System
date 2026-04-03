@@ -8,6 +8,7 @@ import { useApp }  from '../../context/AppContext';
 import { useAuth } from '../../auth/AuthContext';
 import { useMenuPermissions } from '../../auth/useMenuPermissions';
 import FinalPackageModal from './FinalPackageModal';
+import TableColumnVisibility from '../common/TableColumnVisibility';
 
 // ── Pillar config ─────────────────────────────────────────────────────────────
 const PILLARS = [
@@ -55,6 +56,18 @@ const PILLARS = [
     badge:   'bg-sky-100 text-sky-700',
     desc:    'Area handover certificates & completion records',
   },
+];
+
+const FINAL_PACKAGE_TABLE_COLUMNS = [
+  { key: 'row', label: '#' },
+  { key: 'pillar', label: 'Pillar' },
+  { key: 'title', label: 'Title' },
+  { key: 'ref', label: 'Ref.' },
+  { key: 'date', label: 'Date' },
+  { key: 'status', label: 'Status' },
+  { key: 'description', label: 'Description' },
+  { key: 'file', label: 'File' },
+  { key: 'actions', label: 'Actions', locked: true },
 ];
 
 const STATUS_BADGE = {
@@ -382,9 +395,14 @@ export default function FinalPackagePage() {
 
       {/* ── TABLE VIEW ───────────────────────────────────────────────────── */}
       {viewMode === 'table' && (
-        <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
+      <TableColumnVisibility
+        storageKey="final-package-table-columns"
+        tableId="final-package-table"
+        columns={FINAL_PACKAGE_TABLE_COLUMNS}
+        className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden p-4 pt-3"
+      >
+        <div className="overflow-x-auto">
+          <table data-column-table="final-package-table" className="w-full text-xs">
               <thead>
                 <tr className="bg-slate-800 text-white">
                   {['#', 'Pillar', 'Title', 'Ref.', 'Date', 'Status', 'Description', 'File', (canEditFinalDoc || canDeleteFinalDoc) ? 'Actions' : ''].filter(Boolean).map(h => (
@@ -443,7 +461,7 @@ export default function FinalPackagePage() {
               </tbody>
             </table>
           </div>
-        </div>
+      </TableColumnVisibility>
       )}
 
       {/* Modals */}

@@ -29,10 +29,10 @@ export function Textarea({ ...props }) {
   return <textarea className={`${inputBase} resize-none`} rows={3} {...props} />;
 }
 
-export function FormGrid({ children, cols = 2 }) {
+export function FormGrid({ children, cols = 2, className = '' }) {
   const colMap = { 1: 'grid-cols-1', 2: 'grid-cols-2', 3: 'grid-cols-3', 4: 'grid-cols-4' };
   return (
-    <div className={`grid ${colMap[cols]} gap-4`}>
+    <div className={`grid ${colMap[cols]} gap-4 ${className}`}>
       {children}
     </div>
   );

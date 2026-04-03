@@ -30,7 +30,9 @@ const MODULE_TITLES = {
   punchlist:      'Punch List Management',
   handover:       'Handover',
   'final-package':'Final Document Package',
+  markup:         'Markup',
   'markup-dwg':   'Markup DWG',
+  'markup-tag-id':'Markup Tag ID',
 };
 
 function MainApp() {
@@ -48,6 +50,7 @@ function MainApp() {
     if (activePage === 'handover')     return <HandoverPage />;
     if (activePage === 'final-package') return <FinalPackagePage />;
     if (activePage === 'markup-dwg')   return <MarkupDwgPage />;
+    if (activePage === 'markup-tag-id') return <ComingSoon title="Markup Tag ID" />;
     if (activePage === 'admin-users')  return <UserManagementPanel />;
     return <ComingSoon title={MODULE_TITLES[activePage] || activePage} />;
   }

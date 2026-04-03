@@ -48,6 +48,7 @@ function Stage4Uploader({
   disabled,
   locked = false,
   onUploaded,
+  onUploadingChange,
   accentColor = 'green',
 }) {
   const inputRef = useRef(null);
@@ -78,42 +79,49 @@ function Stage4Uploader({
     }
     setErrorMsg('');
     setUploading(true);
-    const safeReq = String(requestNo).replace(/[/\\#?]/g, '-');
-    const results = [];
-    for (let i = 0; i < fileList.length; i++) {
-      const file = fileList[i];
-      if (!S4_MIME.includes(file.type)) {
-        setErrorMsg(`"${file.name}" ไม่รองรับ — อัปโหลดได้เฉพาะ PDF, Excel, รูปภาพ`);
-        continue;
+    onUploadingChange?.(true);
+    try {
+      const safeReq = String(requestNo).replace(/[/\\#?]/g, '-');
+      const results = [];
+      for (let i = 0; i < fileList.length; i++) {
+        const file = fileList[i];
+        if (!S4_MIME.includes(file.type)) {
+          setErrorMsg(`"${file.name}" ไม่รองรับ — อัปโหลดได้เฉพาะ PDF, Excel, รูปภาพ`);
+          continue;
+        }
+        if (file.size > S4_MAX_MB * 1024 * 1024) {
+          setErrorMsg(`"${file.name}" มีขนาดเกิน ${S4_MAX_MB} MB`);
+          continue;
+        }
+        const seq = files.length + results.length + 1;
+        const ext = file.name.split('.').pop();
+        const path = `rfi-stage4/${projectId}/${safeReq}/${folder}_${String(seq).padStart(2, '0')}.${ext}`;
+        const sRef = storageRef(storage, path);
+        const task = uploadBytesResumable(sRef, file);
+        await new Promise((resolve, reject) => {
+          task.on(
+            'state_changed',
+            snap => setProgress(Math.round((snap.bytesTransferred / snap.totalBytes) * 100)),
+            reject,
+            () => resolve(),
+          );
+        });
+        const url = await getDownloadURL(task.snapshot.ref);
+        results.push({ name: file.name, url });
       }
-      if (file.size > S4_MAX_MB * 1024 * 1024) {
-        setErrorMsg(`"${file.name}" มีขนาดเกิน ${S4_MAX_MB} MB`);
-        continue;
-      }
-      const seq = files.length + results.length + 1;
-      const ext = file.name.split('.').pop();
-      const path = `rfi-stage4/${projectId}/${safeReq}/${folder}_${String(seq).padStart(2, '0')}.${ext}`;
-      const sRef = storageRef(storage, path);
-      const task = uploadBytesResumable(sRef, file);
-      await new Promise((resolve, reject) => {
-        task.on(
-          'state_changed',
-          snap => setProgress(Math.round((snap.bytesTransferred / snap.totalBytes) * 100)),
-          reject,
-          () => resolve(),
-        );
+      setFiles(prev => {
+        const merged = [...prev, ...results];
+        onUploaded?.(merged, results);
+        return merged;
       });
-      const url = await getDownloadURL(task.snapshot.ref);
-      results.push({ name: file.name, url });
+    } catch (err) {
+      setErrorMsg(err?.message ?? 'อัปโหลดไฟล์ไม่สำเร็จ');
+    } finally {
+      setUploading(false);
+      onUploadingChange?.(false);
+      setProgress(0);
+      if (inputRef.current) inputRef.current.value = '';
     }
-    setFiles(prev => {
-      const merged = [...prev, ...results];
-      onUploaded?.(merged, results);
-      return merged;
-    });
-    setUploading(false);
-    setProgress(0);
-    if (inputRef.current) inputRef.current.value = '';
   }
 
   function removeFile(idx) {
@@ -183,6 +191,7 @@ export default function RfiStage4Modal({ rfi, onSave, onClose }) {
   const [workflowStatus, setWorkflowStatus] = useState(rfi.stage4Status || '');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
+  const [uploadingSections, setUploadingSections] = useState({});
 
   const [clientSignFiles, setClientSignFiles] = useState(
     Array.isArray(rfi.stage4ClientSignFiles) ? rfi.stage4ClientSignFiles : [],
@@ -193,8 +202,15 @@ export default function RfiStage4Modal({ rfi, onSave, onClose }) {
   const [ownerSignFiles, setOwnerSignFiles] = useState(
     Array.isArray(rfi.stage4OwnerSignFiles) ? rfi.stage4OwnerSignFiles : [],
   );
+  const isUploadingDocuments = Object.values(uploadingSections).some(Boolean);
 
   const set = (field) => (e) => setForm(f => ({ ...f, [field]: e.target.value }));
+  const handleUploadingChange = (section, isUploading) => {
+    setUploadingSections(prev => {
+      if (prev[section] === isUploading) return prev;
+      return { ...prev, [section]: isUploading };
+    });
+  };
 
   const step = useMemo(() => {
     if (workflowStatus === S4_WORKFLOW.RFI_CLOSED) return 4; // done
@@ -320,6 +336,7 @@ export default function RfiStage4Modal({ rfi, onSave, onClose }) {
               folder="qc-sign"
               disabled={!canUploadStep1}
               locked={step > 1}
+              onUploadingChange={(isUploading) => handleUploadingChange('qc-sign', isUploading)}
               onUploaded={(merged) => {
                 const next = S4_WORKFLOW.QC_SIGNED;
                 persist({
@@ -345,6 +362,7 @@ export default function RfiStage4Modal({ rfi, onSave, onClose }) {
               folder="contractor-sign"
               disabled={step !== 2 || !canUploadStep2}
               locked={step > 2}
+              onUploadingChange={(isUploading) => handleUploadingChange('contractor-sign', isUploading)}
               onUploaded={(merged) => {
                 const next = S4_WORKFLOW.CONTRACTOR_SIGNED;
                 persist({
@@ -367,6 +385,7 @@ export default function RfiStage4Modal({ rfi, onSave, onClose }) {
               folder="owner-sign"
               disabled={step !== 3 || !canUploadStep3}
               locked={step > 3}
+              onUploadingChange={(isUploading) => handleUploadingChange('owner-sign', isUploading)}
               onUploaded={(merged) => {
                 const next = S4_WORKFLOW.RFI_CLOSED;
                 persist({
@@ -387,7 +406,7 @@ export default function RfiStage4Modal({ rfi, onSave, onClose }) {
           </button>
           <button
             type="button"
-            disabled={saving}
+            disabled={saving || isUploadingDocuments}
             onClick={async () => {
               await persist({
                 ...form,
@@ -398,9 +417,9 @@ export default function RfiStage4Modal({ rfi, onSave, onClose }) {
               onClose(); // Close modal after saving
             }}
             className="px-6 py-2 text-xs font-semibold text-white bg-green-600 hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition-colors"
-            title="Save form fields and close modal"
+            title={isUploadingDocuments ? 'Please wait for document uploads to finish' : 'Save form fields and close modal'}
           >
-            Save
+            {isUploadingDocuments ? 'Uploading...' : 'Save'}
           </button>
         </div>
       </div>

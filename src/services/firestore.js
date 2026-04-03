@@ -149,4 +149,5 @@ export const categories = {
   punchlist:    'punchlist',
   handover:     'handover',
   finalPackage: 'finalPackage',
+  markupDwg:    'markupDwg',
 };

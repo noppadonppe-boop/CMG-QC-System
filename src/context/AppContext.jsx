@@ -29,6 +29,7 @@ export function AppProvider({ children }) {
   const [punchlist,    setPunchlist]    = useState([]);
   const [handover,     setHandover]     = useState([]);
   const [finalPackage, setFinalPackage] = useState([]);
+  const [markupDwgItems, setMarkupDwgItems] = useState([]);
 
   // Admin roles see every project; others only see their assigned projects
   const isAdmin = useMemo(
@@ -55,7 +56,7 @@ export function AppProvider({ children }) {
 
     setFirestoreError(null);
     let resolved = 0;
-    const total  = 9;
+    const total  = 10;
 
     function onLoad() {
       resolved++;
@@ -74,6 +75,7 @@ export function AppProvider({ children }) {
       subscribeCategory(categories.punchlist,    d => { setPunchlist(d);    onLoad(); }),
       subscribeCategory(categories.handover,     d => { setHandover(d);     onLoad(); }),
       subscribeCategory(categories.finalPackage, d => { setFinalPackage(d); onLoad(); }),
+      subscribeCategory(categories.markupDwg,    d => { setMarkupDwgItems(d); onLoad(); }),
     ];
 
     return () => unsubs.forEach(u => u());
@@ -166,6 +168,11 @@ export function AppProvider({ children }) {
   const updateFinalPackage = (id, c, lu) => updateItemPersist(setFinalPackage, categories.finalPackage, id, c, lu);
   const deleteFinalPackage = id      => deleteItemPersist(setFinalPackage, categories.finalPackage, id);
 
+  // ── Markup DWG ──────────────────────────────────────────────────────────────
+  const addMarkupDwg    = item    => addItemPersist(setMarkupDwgItems, categories.markupDwg, item);
+  const updateMarkupDwg = (id, c, lu) => updateItemPersist(setMarkupDwgItems, categories.markupDwg, id, c, lu);
+  const deleteMarkupDwg = id      => deleteItemPersist(setMarkupDwgItems, categories.markupDwg, id);
+
   const value = {
     selectedProjectId, setSelectedProjectId,
     selectedProject,
@@ -182,6 +189,7 @@ export function AppProvider({ children }) {
     punchlist,    addPunch,       updatePunch,       deletePunch,
     handover,     addHandover,    updateHandover,    deleteHandover,
     finalPackage, addFinalPackage, updateFinalPackage, deleteFinalPackage,
+    markupDwgItems, addMarkupDwg, updateMarkupDwg, deleteMarkupDwg,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

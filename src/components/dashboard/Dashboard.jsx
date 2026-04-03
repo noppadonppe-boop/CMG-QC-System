@@ -5,6 +5,7 @@ import {
 import { useApp }  from '../../context/AppContext';
 import { useAuth } from '../../auth/AuthContext';
 import { ROLE_LABELS, ROLE_COLORS } from '../../auth/constants';
+import TableColumnVisibility from '../common/TableColumnVisibility';
 
 function StatCard({ icon: Icon, label, value, sub, color, bgColor }) {
   return (
@@ -39,6 +40,16 @@ function StatusBadge({ status }) {
     </span>
   );
 }
+
+const DASHBOARD_PROJECT_TABLE_COLUMNS = [
+  { key: 'projectNo', label: 'Project No.' },
+  { key: 'name', label: 'Name' },
+  { key: 'location', label: 'Location' },
+  { key: 'pm', label: 'PM' },
+  { key: 'start', label: 'Start' },
+  { key: 'finish', label: 'Finish' },
+  { key: 'status', label: 'Status' },
+];
 
 export default function Dashboard() {
   const {
@@ -161,12 +172,17 @@ export default function Dashboard() {
 
       {/* All Projects Overview - visible to Exec roles */}
       {(userRoles.some(r => ['MasterAdmin','SuperAdmin','Admin','MD','CD','PM'].includes(r))) && (
-        <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+        <TableColumnVisibility
+          storageKey="dashboard-projects-table-columns"
+          tableId="dashboard-projects-table"
+          columns={DASHBOARD_PROJECT_TABLE_COLUMNS}
+          className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden p-4 pt-3"
+        >
           <div className="px-4 py-3 border-b border-slate-100">
             <h3 className="text-sm font-semibold text-slate-700">All Projects Overview</h3>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-xs">
+            <table data-column-table="dashboard-projects-table" className="w-full text-xs">
               <thead className="bg-slate-50">
                 <tr>
                   {['Project No.', 'Name', 'Location', 'PM', 'Start', 'Finish', 'Status'].map(h => (
@@ -189,7 +205,7 @@ export default function Dashboard() {
               </tbody>
             </table>
           </div>
-        </div>
+        </TableColumnVisibility>
       )}
     </div>
   );

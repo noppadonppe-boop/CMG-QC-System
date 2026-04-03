@@ -3,6 +3,7 @@ import { Plus, Pencil, Trash2, Search, Building2, MapPin, User, Calendar } from 
 import { useApp } from '../../context/AppContext';
 import { useMenuPermissions } from '../../auth/useMenuPermissions';
 import ProjectModal from './ProjectModal';
+import TableColumnVisibility from '../common/TableColumnVisibility';
 
 const STATUS_COLORS = {
   Active:    'bg-green-100 text-green-700',
@@ -10,6 +11,20 @@ const STATUS_COLORS = {
   Closed:    'bg-slate-100 text-slate-600',
   'On Hold': 'bg-amber-100 text-amber-700',
 };
+
+const PROJECT_TABLE_COLUMNS = [
+  { key: 'row', label: '#' },
+  { key: 'projectNo', label: 'Project No.' },
+  { key: 'projectName', label: 'Project Name' },
+  { key: 'location', label: 'Location' },
+  { key: 'client', label: 'Client' },
+  { key: 'pm', label: 'PM' },
+  { key: 'cm', label: 'CM' },
+  { key: 'start', label: 'Start' },
+  { key: 'finish', label: 'Finish' },
+  { key: 'status', label: 'Status' },
+  { key: 'actions', label: 'Actions', locked: true },
+];
 
 function ConfirmDelete({ project, onConfirm, onCancel }) {
   return (
@@ -117,9 +132,14 @@ export default function ProjectsPage() {
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+      <TableColumnVisibility
+        storageKey="projects-table-columns"
+        tableId="projects-table"
+        columns={PROJECT_TABLE_COLUMNS}
+        className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden p-4 pt-3"
+      >
         <div className="overflow-x-auto">
-          <table className="w-full text-xs">
+          <table data-column-table="projects-table" className="w-full text-xs">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-100">
                 {['#', 'Project No.', 'Project Name', 'Location', 'Client', 'PM', 'CM', 'Start', 'Finish', 'Status', 'Actions'].map(h => (
@@ -218,7 +238,7 @@ export default function ProjectsPage() {
           })}
           <span className="ml-auto">Total: <span className="font-semibold text-slate-700">{projects.length}</span></span>
         </div>
-      </div>
+      </TableColumnVisibility>
 
       {/* Modals */}
       {(modalMode === 'add' || modalMode === 'edit') && (

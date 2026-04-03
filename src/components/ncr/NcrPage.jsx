@@ -7,6 +7,7 @@ import { useApp }  from '../../context/AppContext';
 import { useAuth } from '../../auth/AuthContext';
 import { useMenuPermissions } from '../../auth/useMenuPermissions';
 import NcrModal from './NcrModal';
+import TableColumnVisibility from '../common/TableColumnVisibility';
 
 const STATUS_BADGE = {
   'Open':         'bg-red-100 text-red-700',
@@ -26,6 +27,20 @@ const TYPE_BADGE = {
   'Internal NCR': 'bg-slate-100 text-slate-700',
   'External NCR': 'bg-orange-100 text-orange-700',
 };
+
+const NCR_TABLE_COLUMNS = [
+  { key: 'row', label: '#' },
+  { key: 'ncrNo', label: 'NCR No.' },
+  { key: 'issueDate', label: 'Issue Date' },
+  { key: 'type', label: 'Type' },
+  { key: 'category', label: 'Category' },
+  { key: 'description', label: 'Description' },
+  { key: 'assignedTo', label: 'Assigned To' },
+  { key: 'actionToClose', label: 'Action to Close' },
+  { key: 'attachment', label: 'Attachment' },
+  { key: 'status', label: 'Status' },
+  { key: 'actions', label: 'Actions', locked: true },
+];
 
 function ConfirmDelete({ item, onConfirm, onCancel }) {
   return (
@@ -184,9 +199,14 @@ export default function NcrPage() {
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+      <TableColumnVisibility
+        storageKey="ncr-table-columns"
+        tableId="ncr-table"
+        columns={NCR_TABLE_COLUMNS}
+        className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden p-4 pt-3"
+      >
         <div className="overflow-x-auto">
-          <table className="w-full text-xs">
+          <table data-column-table="ncr-table" className="w-full text-xs">
             <thead>
               <tr className="bg-slate-800 text-white">
                 {['#', 'NCR No.', 'Issue Date', 'Type', 'Category', 'Description', 'Assigned To', 'Action to Close', 'Attachment', 'Status', (canEditNcr || canDeleteNcr) ? 'Actions' : ''].filter(Boolean).map(h => (
@@ -330,7 +350,7 @@ export default function NcrPage() {
             </div>
           </div>
         )}
-      </div>
+      </TableColumnVisibility>
 
       {(modalMode === 'add' || modalMode === 'edit') && (
         <NcrModal

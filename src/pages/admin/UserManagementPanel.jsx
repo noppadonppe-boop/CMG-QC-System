@@ -18,6 +18,25 @@ import {
   Users, Search, CheckCircle, XCircle, Clock, ChevronDown, X, Save,
   ShieldCheck, FolderOpen, Trash2, Plus,
 } from 'lucide-react';
+import TableColumnVisibility from '../../components/common/TableColumnVisibility';
+
+const USER_TABLE_COLUMNS = [
+  { key: 'user', label: 'ผู้ใช้' },
+  { key: 'roles', label: 'Roles' },
+  { key: 'projects', label: 'โครงการ' },
+  { key: 'status', label: 'สถานะ' },
+  { key: 'created', label: 'สมัครเมื่อ' },
+  { key: 'actions', label: 'จัดการ', locked: true },
+];
+
+const ACTIVITY_TABLE_COLUMNS = [
+  { key: 'time', label: 'เวลา' },
+  { key: 'action', label: 'Action' },
+  { key: 'method', label: 'Method' },
+  { key: 'user', label: 'ผู้ใช้' },
+  { key: 'email', label: 'อีเมล' },
+  { key: 'detail', label: 'รายละเอียด' },
+];
 
 const USERS_PATH      = `${APP_NAME}/root/users`;
 const ACTIVITY_PATH   = `${APP_NAME}/root/activityLogs`;
@@ -610,6 +629,7 @@ export default function UserManagementPanel() {
     { id: 'handover',      label: 'Handover' },
     { id: 'final-package', label: 'Final Document Package' },
     { id: 'markup-dwg',    label: 'Markup DWG' },
+    { id: 'markup-tag-id', label: 'Markup Tag ID' },
     { id: 'admin-users',   label: 'จัดการผู้ใช้' },
   ];
 
@@ -651,6 +671,7 @@ export default function UserManagementPanel() {
       { id: 'saveMarkup',    label: 'Save Markup' },
       { id: 'deleteMarkup',  label: 'Delete Markup' },
     ],
+    'markup-tag-id': [],
     materials: [
       { id: 'addMaterial',    label: 'Add Material Record' },
       { id: 'editMaterial',   label: 'Edit Material Record' },
@@ -925,9 +946,14 @@ export default function UserManagementPanel() {
 
         {/* Users Table */}
         {activeTab === 'users' && (
-        <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+        <TableColumnVisibility
+        storageKey="admin-users-table-columns"
+        tableId="admin-users-table"
+        columns={USER_TABLE_COLUMNS}
+        className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden p-4 pt-3"
+        >
           <div className="overflow-x-auto">
-            <table className="w-full">
+            <table data-column-table="admin-users-table" className="w-full">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-100">
                   <th className="text-left px-4 py-3 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">ผู้ใช้</th>
@@ -1020,12 +1046,17 @@ export default function UserManagementPanel() {
               </tbody>
             </table>
           </div>
-        </div>
+        </TableColumnVisibility>
         )}
 
         {/* Activity Log Tab */}
         {activeTab === 'activity' && (
-          <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+          <TableColumnVisibility
+            storageKey="admin-activity-table-columns"
+            tableId="admin-activity-table"
+            columns={ACTIVITY_TABLE_COLUMNS}
+            className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden p-4 pt-3"
+          >
             <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50">
               <div>
                 <h2 className="text-sm font-semibold text-slate-800">Activity Log</h2>
@@ -1117,7 +1148,7 @@ export default function UserManagementPanel() {
                 </table>
               )}
             </div>
-          </div>
+          </TableColumnVisibility>
         )}
 
         {/* Role Permissions Tab */}

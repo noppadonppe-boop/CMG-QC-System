@@ -7,6 +7,7 @@ import {
 import { useApp } from '../../context/AppContext';
 import QcDocModal, { generateTransmittalNo } from './QcDocModal';
 import { useMenuPermissions } from '../../auth/useMenuPermissions';
+import TableColumnVisibility from '../common/TableColumnVisibility';
 
 const STATUS_COLORS = {
   'Approved':         'bg-green-100 text-green-700',
@@ -34,6 +35,25 @@ const CAT_GROUP_COLORS = {
   'Material approved': 'bg-amber-100 text-amber-700',
   'Drawing':           'bg-blue-100 text-blue-700',
 };
+
+const QC_DOC_TABLE_COLUMNS = [
+  { key: 'row', label: '#' },
+  { key: 'transmittalNo', label: 'Transmittal No.' },
+  { key: 'transRef', label: 'Trans Ref' },
+  { key: 'transDate', label: 'Trans. Date' },
+  { key: 'from', label: 'From' },
+  { key: 'type', label: 'Type' },
+  { key: 'catGroup', label: 'Category Group' },
+  { key: 'cat', label: 'Category' },
+  { key: 'documentNo', label: 'Document No.' },
+  { key: 'documentTitle', label: 'Document Title' },
+  { key: 'receiveDate', label: 'Receive Date' },
+  { key: 'revision', label: 'Revision' },
+  { key: 'status', label: 'Status' },
+  { key: 'delivery', label: 'Delivery' },
+  { key: 'attachments', label: 'Attachments' },
+  { key: 'actions', label: 'Actions', locked: true },
+];
 
 function ConfirmDelete({ doc, onConfirm, onCancel }) {
   return (
@@ -553,9 +573,14 @@ export default function QcDocumentsPage() {
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+      <TableColumnVisibility
+        storageKey="qc-documents-table-columns"
+        tableId="qc-documents-table"
+        columns={QC_DOC_TABLE_COLUMNS}
+        className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden p-4 pt-3"
+      >
         <div className="overflow-x-auto">
-          <table className="w-full text-xs">
+          <table data-column-table="qc-documents-table" className="w-full text-xs">
             <thead>
               <tr className="bg-slate-800 text-white">
                 {['#', 'Transmittal No.', 'Trans Ref', 'Trans. Date', 'From', 'Type', 'Category Group', 'Category', 'Document No.', 'Document Title', 'Receive Date', 'Revision', 'Status', 'Delivery', 'Attachments', (canDuplicateTransmittal || canAddTransmittal || canEditTransmittal || canDeleteTransmittal) ? 'Actions' : ''].filter(Boolean).map(h => (
@@ -609,7 +634,7 @@ export default function QcDocumentsPage() {
             </span>
           )}
         </div>
-      </div>
+      </TableColumnVisibility>
 
       {/* Modals */}
       {(modalMode === 'add' || modalMode === 'edit' || modalMode === 'duplicate') && (

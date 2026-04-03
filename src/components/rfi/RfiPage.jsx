@@ -1,17 +1,24 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import {
   Plus, Search, Eye, Pencil, ArrowRight, Trash2,
   AlertTriangle, Clock, FileCheck2, Send,
-  ClipboardCheck, X, Download
+  ClipboardCheck, X, Download, Upload, Loader2
 } from 'lucide-react';
+import {
+  ref as storageRef,
+  uploadBytesResumable,
+  getDownloadURL,
+} from 'firebase/storage';
 import { useApp }  from '../../context/AppContext';
 import { useAuth } from '../../auth/AuthContext';
 import { useMenuPermissions } from '../../auth/useMenuPermissions';
+import { storage } from '../../config/firebase';
 import RfiStage1Modal from './RfiStage1Modal';
 import RfiStage2Modal from './RfiStage2Modal';
 import RfiStage3Modal from './RfiStage3Modal';
 import RfiStage4Modal from './RfiStage4Modal';
 import RfiDetailModal from './RfiDetailModal';
+import TableColumnVisibility from '../common/TableColumnVisibility';
 
 // ── Stage config ───────────────────────────────────────────────────────────────
 const STAGES = [
@@ -77,6 +84,110 @@ const RESULT_COLORS = {
   'Pending':           'bg-slate-100 text-slate-500',
 };
 
+const RFI_TABLE_COLUMNS = [
+  { key: 'row', label: '#' },
+  { key: 'rfiNo', label: 'RFI No.' },
+  { key: 'requestNo', label: 'Request No.' },
+  { key: 'type', label: 'Type' },
+  { key: 'location', label: 'Location' },
+  { key: 'area', label: 'Area', defaultHidden: true },
+  { key: 'requestDateInternal', label: 'Stage 1 Request Date (Internal)', defaultHidden: true },
+  { key: 'requestTimeInternal', label: 'Stage 1 Request Time (Internal)', defaultHidden: true },
+  { key: 'requestDateOwner', label: 'Stage 1 Request Date (Owner)', defaultHidden: true },
+  { key: 'requestTimeOwner', label: 'Stage 1 Request Time (Owner)', defaultHidden: true },
+  { key: 'workingStep', label: 'Stage 1 Working Step', defaultHidden: true },
+  { key: 'structureType', label: 'Stage 1 Structure Type', defaultHidden: true },
+  { key: 'requestedBy', label: 'Stage 1 Requested By', defaultHidden: true },
+  { key: 'inspectedBy', label: 'Stage 1 Inspected By', defaultHidden: true },
+  { key: 'detailInspection', label: 'Stage 1 Detail', defaultHidden: true },
+  { key: 'dueDate', label: 'Due Date' },
+  { key: 'stage', label: 'Stage' },
+  { key: 'inspectionPackage', label: 'Stage 2 Work Step', defaultHidden: true },
+  { key: 'inspectionScheduleDate', label: 'Stage 2 Schedule Date', defaultHidden: true },
+  { key: 'inspectionScheduleTime', label: 'Stage 2 Schedule Time', defaultHidden: true },
+  { key: 'descriptionOfInspection', label: 'Stage 2 Inspection Scope', defaultHidden: true },
+  { key: 'stage2Note', label: 'Stage 2 Note', defaultHidden: true },
+  { key: 'stage2EmailStatus', label: 'Stage 2 Email Status', defaultHidden: true },
+  { key: 'inspectionDate', label: 'Stage 3 Inspection Date', defaultHidden: true },
+  { key: 'stage3Result', label: 'Stage 3 Result', defaultHidden: true },
+  { key: 'stage3Note', label: 'Stage 3 Note', defaultHidden: true },
+  { key: 'concretePourDate', label: 'Stage 3 Concrete Pour Date', defaultHidden: true },
+  { key: 'brand', label: 'Stage 3 Cement Brand', defaultHidden: true },
+  { key: 'cementQty', label: 'Stage 3 Cement Qty', defaultHidden: true },
+  { key: 'cementUnit', label: 'Stage 3 Cement Unit', defaultHidden: true },
+  { key: 'steelTestResult', label: 'Stage 3 Steel Test', defaultHidden: true },
+  { key: 'soilTestResult', label: 'Stage 3 Soil Test', defaultHidden: true },
+  { key: 'stage4Status', label: 'Stage 4 Status', defaultHidden: true },
+  { key: 'stage4Note', label: 'Stage 4 Note', defaultHidden: true },
+  { key: 'stage4Progress', label: 'Stage 4 Progress', defaultHidden: true },
+  { key: 'statusInsp', label: 'Status Insp.' },
+  { key: 'statusDoc', label: 'Status Doc' },
+  { key: 'test7', label: 'ผลเท 7 วัน' },
+  { key: 'test28', label: 'ผลเท 28 วัน' },
+  { key: 'actions', label: 'Actions', locked: true },
+];
+
+const TEST_RESULT_MIME = [
+  'application/pdf',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+];
+const TEST_RESULT_EXT = '.pdf,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.webp';
+const TEST_RESULT_MAX_MB = 20;
+
+function startOfDay(date) {
+  const value = new Date(date);
+  value.setHours(0, 0, 0, 0);
+  return value;
+}
+
+function addDays(dateString, days) {
+  if (!dateString) return null;
+  const value = startOfDay(dateString);
+  if (Number.isNaN(value.getTime())) return null;
+  value.setDate(value.getDate() + days);
+  return value;
+}
+
+function formatDate(date) {
+  if (!date) return '—';
+  return date.toISOString().slice(0, 10);
+}
+
+function getConcreteTestAlerts(rfi) {
+  if (!rfi.concretePourDate) {
+    return {
+      due7Date: null,
+      due28Date: null,
+      is7Due: false,
+      is28Due: false,
+      is7Uploaded: Array.isArray(rfi.test7DayFiles) && rfi.test7DayFiles.length > 0,
+      is28Uploaded: Array.isArray(rfi.test28DayFiles) && rfi.test28DayFiles.length > 0,
+      hasPendingAlert: false,
+    };
+  }
+  const today = startOfDay(new Date());
+  const due7Date = addDays(rfi.concretePourDate, 7);
+  const due28Date = addDays(rfi.concretePourDate, 28);
+  const is7Uploaded = Array.isArray(rfi.test7DayFiles) && rfi.test7DayFiles.length > 0;
+  const is28Uploaded = Array.isArray(rfi.test28DayFiles) && rfi.test28DayFiles.length > 0;
+  const is7Due = !!due7Date && due7Date <= today && !is7Uploaded;
+  const is28Due = !!due28Date && due28Date <= today && !is28Uploaded;
+  return {
+    due7Date,
+    due28Date,
+    is7Due,
+    is28Due,
+    is7Uploaded,
+    is28Uploaded,
+    hasPendingAlert: is7Due || is28Due,
+  };
+}
+
 // ── Confirm Delete modal ──────────────────────────────────────────────────────
 function ConfirmDeleteRfi({ rfi, onConfirm, onCancel }) {
   return (
@@ -106,6 +217,57 @@ function ConfirmDeleteRfi({ rfi, onConfirm, onCancel }) {
   );
 }
 
+function TestResultUploadCell({ label, dueDate, isDue, files, uploading, onUploadClick, inputRef, onFileChange }) {
+  const hasFiles = Array.isArray(files) && files.length > 0;
+  const showUploadButton = isDue && !hasFiles;
+
+  return (
+    <div className={`inline-flex max-w-full items-center gap-2 rounded-md border px-2 py-1 ${
+      isDue ? 'border-red-300 bg-red-50' : 'border-slate-200 bg-white'
+    }`}>
+      <span className="text-[10px] font-semibold text-slate-600 whitespace-nowrap">{label}</span>
+      <span className={`text-[10px] whitespace-nowrap ${isDue ? 'text-red-700 font-semibold' : 'text-slate-500'}`}>
+        Due: {formatDate(dueDate)}
+      </span>
+      {hasFiles ? (
+        <a
+          href={files[0].url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex max-w-full items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-semibold text-green-700 hover:bg-green-200"
+          title={files[0].name}
+        >
+          <span className="truncate max-w-[88px]">{files[0].name}</span>
+        </a>
+      ) : showUploadButton ? (
+        <button
+          type="button"
+          onClick={onUploadClick}
+          disabled={uploading}
+          className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold transition-colors whitespace-nowrap ${
+            isDue
+              ? 'bg-red-100 text-red-700 hover:bg-red-200'
+              : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+          } disabled:opacity-60`}
+        >
+          {uploading ? <Loader2 size={10} className="animate-spin" /> : <Upload size={10} />}
+          {uploading ? 'Uploading...' : 'Upload'}
+        </button>
+      ) : (
+        <span className="text-[10px] text-slate-400 whitespace-nowrap">Waiting</span>
+      )}
+      <input
+        ref={inputRef}
+        type="file"
+        multiple
+        accept={TEST_RESULT_EXT}
+        className="hidden"
+        onChange={onFileChange}
+      />
+    </div>
+  );
+}
+
 // ── Per-stage action label config ──────────────────────────────────────────────
 const STAGE_ADVANCE = {
   1: { label: 'Issue →',    color: 'bg-blue-600'   },
@@ -118,6 +280,13 @@ function RfiCard({ rfi, stage, canAdvance, canEdit, canDelete, onView, onEdit, o
   const isCurrentStage = rfi.stage === stage.id;
   const isDone         = rfi.stage > stage.id;
   const isOverdue      = rfi.dueDate && rfi.stage < 4 && new Date(rfi.dueDate) < new Date();
+  const concreteAlerts = getConcreteTestAlerts(rfi);
+  const stage4CompletedSteps = [
+    Array.isArray(rfi.stage4ClientSignFiles) && rfi.stage4ClientSignFiles.length > 0,
+    Array.isArray(rfi.stage4CompleteFiles) && rfi.stage4CompleteFiles.length > 0,
+    Array.isArray(rfi.stage4OwnerSignFiles) && rfi.stage4OwnerSignFiles.length > 0,
+  ].filter(Boolean).length;
+  const stage4ProgressPercent = Math.round((stage4CompletedSteps / 3) * 100);
 
   const result = stage.id === 1 ? rfi.statusInsp
                : stage.id === 3 ? rfi.result
@@ -136,8 +305,8 @@ function RfiCard({ rfi, stage, canAdvance, canEdit, canDelete, onView, onEdit, o
   return (
     <div
       className={`rounded-lg border shadow-sm p-2.5 transition-all hover:shadow-md cursor-pointer group
-        ${isDone        ? 'bg-white border-slate-100 opacity-60' :
-          isCurrentStage ? `bg-white ${stage.border} shadow-sm` :
+        ${isDone        ? `bg-white ${concreteAlerts.hasPendingAlert ? 'border-red-400' : 'border-slate-100'} opacity-60` :
+          isCurrentStage ? `bg-white ${concreteAlerts.hasPendingAlert ? 'border-red-500 shadow-[0_0_0_1px_rgba(239,68,68,0.18)]' : `${stage.border} shadow-sm`}` :
           'bg-white border-slate-100 opacity-40 pointer-events-none'}`}
       onClick={() => onView(rfi)}
     >
@@ -150,7 +319,12 @@ function RfiCard({ rfi, stage, canAdvance, canEdit, canDelete, onView, onEdit, o
             <span className="text-[10px] text-slate-500 truncate">— {rfi.rfiNo}</span>
           )}
         </div>
-        <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${isDone ? 'bg-green-400' : stage.dot}`} />
+        <div className="flex items-center gap-1 shrink-0">
+          {concreteAlerts.hasPendingAlert && (
+            <AlertTriangle size={12} className="text-red-600 animate-pulse" />
+          )}
+          <div className={`w-1.5 h-1.5 rounded-full ${isDone ? 'bg-green-400' : stage.dot}`} />
+        </div>
       </div>
 
       {/* Type of inspection */}
@@ -174,6 +348,28 @@ function RfiCard({ rfi, stage, canAdvance, canEdit, canDelete, onView, onEdit, o
           rfi.stage4Status === 'Complete document' ? 'bg-blue-100 text-blue-700' :
           'bg-amber-100 text-amber-700'}`}>
           🔒 {rfi.stage4Status}
+        </div>
+      )}
+      {stage.id === 4 && (
+        <div className="mb-1.5 rounded-md border border-green-200 bg-green-50 px-2 py-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[9px] font-semibold uppercase tracking-wider text-green-700">Document Progress</span>
+            <span className="text-[14px] font-extrabold leading-none text-green-700">{stage4ProgressPercent}%</span>
+          </div>
+          <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-green-100">
+            <div
+              className="h-full rounded-full bg-green-500 transition-all"
+              style={{ width: `${stage4ProgressPercent}%` }}
+            />
+          </div>
+          <div className="mt-1 text-[9px] text-green-700">
+            {stage4CompletedSteps}/3 steps uploaded
+          </div>
+        </div>
+      )}
+      {concreteAlerts.hasPendingAlert && (
+        <div className="mb-1 rounded-md border border-red-200 bg-red-50 px-2 py-1 text-[9px] font-semibold text-red-700">
+          Concrete test due: {concreteAlerts.is7Due ? '7-day' : ''}{concreteAlerts.is7Due && concreteAlerts.is28Due ? ' + ' : ''}{concreteAlerts.is28Due ? '28-day' : ''} upload pending
         </div>
       )}
 
@@ -363,6 +559,8 @@ export default function RfiPage() {
   const [detailModal,   setDetailModal]  = useState(null);
   const [editTarget,    setEditTarget]   = useState(null);
   const [deleteTarget,  setDeleteTarget] = useState(null);
+  const uploadInputRefs = useRef({});
+  const [uploadingTests, setUploadingTests] = useState({});
 
   const projectRfis = rfiItems.filter(r => r.projectId === selectedProjectId);
 
@@ -391,6 +589,7 @@ export default function RfiPage() {
       inspectionScheduleDate: '', inspectionScheduleTime: '', stage2Note: '',
       inspectionDate: '', result: '', stage3Note: '', stage3Attachment: '',
       stage4Result: '', stage4Note: '', stage4Status: '', stage4Attachment: '',
+      test7DayFiles: [], test28DayFiles: [],
     };
     addRfi(newRfi);
     setStage1Modal(false);
@@ -484,6 +683,61 @@ export default function RfiPage() {
       // close detail modal if it was showing this rfi
       if (detailModal?.id === deleteTarget.id) setDetailModal(null);
       setDeleteTarget(null);
+    }
+  }
+
+  function getUploadKey(rfiId, type) {
+    return `${rfiId}:${type}`;
+  }
+
+  function setUploadInputRef(rfiId, type, node) {
+    uploadInputRefs.current[getUploadKey(rfiId, type)] = node;
+  }
+
+  function openTestUploadDialog(rfiId, type) {
+    uploadInputRefs.current[getUploadKey(rfiId, type)]?.click();
+  }
+
+  async function handleConcreteTestUpload(rfi, type, fileList) {
+    if (!fileList?.length) return;
+    const uploadKey = getUploadKey(rfi.id, type);
+    setUploadingTests(prev => ({ ...prev, [uploadKey]: true }));
+    try {
+      const safeReq = String(rfi.requestNo || rfi.rfiNo || rfi.id).replace(/[/\\#?]/g, '-');
+      const field = type === '7day' ? 'test7DayFiles' : 'test28DayFiles';
+      const statusField = type === '7day' ? 'status7Day' : 'status28Day';
+      const existingFiles = Array.isArray(rfi[field]) ? rfi[field] : [];
+      const results = [];
+      for (let i = 0; i < fileList.length; i++) {
+        const file = fileList[i];
+        if (!TEST_RESULT_MIME.includes(file.type)) {
+          window.alert(`ไฟล์ "${file.name}" ไม่รองรับ`);
+          continue;
+        }
+        if (file.size > TEST_RESULT_MAX_MB * 1024 * 1024) {
+          window.alert(`ไฟล์ "${file.name}" มีขนาดเกิน ${TEST_RESULT_MAX_MB} MB`);
+          continue;
+        }
+        const ext = file.name.split('.').pop();
+        const seq = existingFiles.length + results.length + 1;
+        const path = `rfi-concrete-tests/${rfi.projectId}/${safeReq}/${type}_${String(seq).padStart(2, '0')}.${ext}`;
+        const sRef = storageRef(storage, path);
+        const task = uploadBytesResumable(sRef, file);
+        await new Promise((resolve, reject) => {
+          task.on('state_changed', undefined, reject, () => resolve());
+        });
+        const url = await getDownloadURL(task.snapshot.ref);
+        results.push({ name: file.name, url });
+      }
+      if (!results.length) return;
+      updateRfi(rfi.id, {
+        [field]: [...existingFiles, ...results],
+        [statusField]: 'Uploaded',
+      });
+    } finally {
+      setUploadingTests(prev => ({ ...prev, [uploadKey]: false }));
+      const input = uploadInputRefs.current[uploadKey];
+      if (input) input.value = '';
     }
   }
 
@@ -615,53 +869,142 @@ export default function RfiPage() {
 
       {/* ── TABLE VIEW ─────────────────────────────────────────────────────── */}
       {viewMode === 'table' && (
-        <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+        <TableColumnVisibility
+          storageKey={`rfi-table-columns:${selectedProjectId || 'all'}`}
+          tableId="rfi-table"
+          columns={RFI_TABLE_COLUMNS}
+          className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden p-4 pt-3"
+        >
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table data-column-table="rfi-table" className="w-full text-sm">
               <thead>
                 <tr className="bg-slate-800 text-white">
-                  {['#', 'RFI No.', 'Request No.', 'Type', 'Location / Area', 'Due Date', 'Stage', 'Status Insp.', 'Status Doc', 'Actions'].map(h => (
-                    <th key={h} className="px-3 py-3 text-left font-semibold whitespace-nowrap text-xs tracking-wide">{h}</th>
+                  {RFI_TABLE_COLUMNS.map(h => (
+                    <th key={h.key} className="px-3 py-3 text-left font-semibold whitespace-nowrap text-xs tracking-wide">{h.label}</th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={10} className="px-3 py-8 text-center text-slate-400">
+                    <td colSpan={RFI_TABLE_COLUMNS.length} className="px-3 py-8 text-center text-slate-400">
                       No RFI records for <span className="font-semibold">{selectedProject?.name}</span>.
                     </td>
                   </tr>
                 )}
                 {filtered.map((rfi, idx) => {
                   const stage = STAGES[rfi.stage - 1];
+                  const concreteAlerts = getConcreteTestAlerts(rfi);
+                  const rowClass = concreteAlerts.hasPendingAlert
+                    ? 'border-y border-red-300 bg-red-50/70 hover:bg-red-50'
+                    : 'hover:bg-slate-50';
+                  const rowTextClass = concreteAlerts.hasPendingAlert ? 'text-red-700' : '';
                   return (
-                    <tr key={rfi.id} className="hover:bg-slate-50 transition-colors group">
-                      <td className="px-3 py-3 text-slate-400 font-mono text-xs">{idx + 1}</td>
-                      <td className="px-3 py-3 font-mono font-bold text-slate-800 whitespace-nowrap text-sm">{rfi.rfiNo}</td>
-                      <td className="px-3 py-3 font-mono text-slate-600 whitespace-nowrap text-xs">{rfi.requestNo}</td>
-                      <td className="px-3 py-3 text-slate-700 whitespace-nowrap text-xs">{rfi.typeOfInspection}</td>
-                      <td className="px-3 py-3 text-slate-600 text-xs">
-                        <div>{rfi.location}</div>
-                        <div className="text-[10px] text-slate-400">{rfi.area}</div>
+                    <tr key={rfi.id} className={`transition-colors group ${rowClass}`}>
+                      <td className={`px-3 py-2 font-mono text-xs ${concreteAlerts.hasPendingAlert ? 'text-red-500' : 'text-slate-400'}`}>{idx + 1}</td>
+                      <td className={`px-3 py-2 font-mono font-bold whitespace-nowrap text-sm ${concreteAlerts.hasPendingAlert ? 'text-red-800' : 'text-slate-800'}`}>{rfi.rfiNo}</td>
+                      <td className={`px-3 py-2 font-mono whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.requestNo}</td>
+                      <td className={`px-3 py-2 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-700'}`}>{rfi.typeOfInspection}</td>
+                      <td className={`px-3 py-2 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.location || '—'}</td>
+                      <td className={`px-3 py-2 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.area || '—'}</td>
+                      <td className={`px-3 py-2 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.requestDateInternal || '—'}</td>
+                      <td className={`px-3 py-2 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.requestTimeInternal || '—'}</td>
+                      <td className={`px-3 py-2 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.requestDateOwner || '—'}</td>
+                      <td className={`px-3 py-2 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.requestTimeOwner || '—'}</td>
+                      <td className={`px-3 py-2 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.workingStep || '—'}</td>
+                      <td className={`px-3 py-2 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.structureType || '—'}</td>
+                      <td className={`px-3 py-2 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.requestedBy || '—'}</td>
+                      <td className={`px-3 py-2 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.inspectedBy || '—'}</td>
+                      <td className={`px-3 py-2 text-xs min-w-[220px] ${rowTextClass || 'text-slate-600'}`}>
+                        <div className="truncate" title={rfi.detailInspection || '—'}>{rfi.detailInspection || '—'}</div>
                       </td>
-                      <td className="px-3 py-3 text-slate-500 whitespace-nowrap font-mono text-xs">{rfi.dueDate || '—'}</td>
-                      <td className="px-3 py-3">
+                      <td className={`px-3 py-2 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.dueDate || '—'}</td>
+                      <td className="px-3 py-2">
                         <span className={`text-xs font-bold px-2 py-1 rounded-full ${stage?.badge}`}>
                           {stage?.label}
                         </span>
                       </td>
-                      <td className="px-3 py-3">
+                      <td className={`px-3 py-2 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.inspectionPackage || '—'}</td>
+                      <td className={`px-3 py-2 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.inspectionScheduleDate || '—'}</td>
+                      <td className={`px-3 py-2 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.inspectionScheduleTime || '—'}</td>
+                      <td className={`px-3 py-2 text-xs min-w-[220px] ${rowTextClass || 'text-slate-600'}`}>
+                        <div className="truncate" title={rfi.descriptionOfInspection || '—'}>{rfi.descriptionOfInspection || '—'}</div>
+                      </td>
+                      <td className={`px-3 py-2 text-xs min-w-[200px] ${rowTextClass || 'text-slate-600'}`}>
+                        <div className="truncate" title={rfi.stage2Note || '—'}>{rfi.stage2Note || '—'}</div>
+                      </td>
+                      <td className={`px-3 py-2 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.stage2EmailStatus || '—'}</td>
+                      <td className={`px-3 py-2 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.inspectionDate || '—'}</td>
+                      <td className="px-3 py-2">
+                        <span className={`text-xs font-semibold px-2 py-1 rounded-full ${RESULT_COLORS[rfi.result] || 'bg-slate-100 text-slate-500'}`}>
+                          {rfi.result || '—'}
+                        </span>
+                      </td>
+                      <td className={`px-3 py-2 text-xs min-w-[200px] ${rowTextClass || 'text-slate-600'}`}>
+                        <div className="truncate" title={rfi.stage3Note || '—'}>{rfi.stage3Note || '—'}</div>
+                      </td>
+                      <td className={`px-3 py-2 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.concretePourDate || '—'}</td>
+                      <td className={`px-3 py-2 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.brand || '—'}</td>
+                      <td className={`px-3 py-2 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.cementQty || '—'}</td>
+                      <td className={`px-3 py-2 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.cementUnit || '—'}</td>
+                      <td className={`px-3 py-2 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.steelTestResult || '—'}</td>
+                      <td className={`px-3 py-2 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.soilTestResult || '—'}</td>
+                      <td className={`px-3 py-2 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.stage4Status || '—'}</td>
+                      <td className={`px-3 py-2 text-xs min-w-[200px] ${rowTextClass || 'text-slate-600'}`}>
+                        <div className="truncate" title={rfi.stage4Note || '—'}>{rfi.stage4Note || '—'}</div>
+                      </td>
+                      <td className="px-3 py-2">
+                        <span className="inline-flex items-center rounded-full bg-green-50 px-2 py-1 text-xs font-semibold text-green-700">
+                          {Math.round(([
+                            Array.isArray(rfi.stage4ClientSignFiles) && rfi.stage4ClientSignFiles.length > 0,
+                            Array.isArray(rfi.stage4CompleteFiles) && rfi.stage4CompleteFiles.length > 0,
+                            Array.isArray(rfi.stage4OwnerSignFiles) && rfi.stage4OwnerSignFiles.length > 0,
+                          ].filter(Boolean).length / 3) * 100)}%
+                        </span>
+                      </td>
+                      <td className="px-3 py-2">
                         <span className={`text-xs font-semibold px-2 py-1 rounded-full ${RESULT_COLORS[rfi.statusInsp] || 'bg-slate-100 text-slate-500'}`}>
                           {rfi.statusInsp || '—'}
                         </span>
                       </td>
-                      <td className="px-3 py-3">
+                      <td className="px-3 py-2">
                         <span className={`text-xs font-semibold px-2 py-1 rounded-full ${RESULT_COLORS[rfi.statusDoc] || 'bg-slate-100 text-slate-500'}`}>
                           {rfi.statusDoc || '—'}
                         </span>
                       </td>
-                      <td className="px-3 py-3">
+                      <td className="px-3 py-2 align-middle">
+                        {rfi.concretePourDate ? (
+                          <TestResultUploadCell
+                            label={rfi.status7Day || 'Pending'}
+                            dueDate={concreteAlerts.due7Date}
+                            isDue={concreteAlerts.is7Due}
+                            files={rfi.test7DayFiles}
+                            uploading={!!uploadingTests[getUploadKey(rfi.id, '7day')]}
+                            onUploadClick={() => openTestUploadDialog(rfi.id, '7day')}
+                            inputRef={node => setUploadInputRef(rfi.id, '7day', node)}
+                            onFileChange={e => handleConcreteTestUpload(rfi, '7day', e.target.files)}
+                          />
+                        ) : (
+                          <span className="text-xs text-slate-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 align-middle">
+                        {rfi.concretePourDate && !concreteAlerts.is7Due ? (
+                          <TestResultUploadCell
+                            label={rfi.status28Day || 'Pending'}
+                            dueDate={concreteAlerts.due28Date}
+                            isDue={concreteAlerts.is28Due}
+                            files={rfi.test28DayFiles}
+                            uploading={!!uploadingTests[getUploadKey(rfi.id, '28day')]}
+                            onUploadClick={() => openTestUploadDialog(rfi.id, '28day')}
+                            inputRef={node => setUploadInputRef(rfi.id, '28day', node)}
+                            onFileChange={e => handleConcreteTestUpload(rfi, '28day', e.target.files)}
+                          />
+                        ) : (
+                          <span className="text-xs text-slate-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2">
                         {(() => {
                           const { canAdvance, canEdit, canDelete } = getCardPerms(rfi);
                           const advCfg = STAGE_ADVANCE[rfi.stage];
@@ -711,7 +1054,7 @@ export default function RfiPage() {
               </tbody>
             </table>
           </div>
-        </div>
+        </TableColumnVisibility>
       )}
 
       {/* ── Modals ─────────────────────────────────────────────────────────── */}
