@@ -177,6 +177,7 @@ function Stage4Uploader({
 export default function RfiStage4Modal({ rfi, onSave, onClose }) {
   const { canAction } = useMenuPermissions();
   const { updateRfi } = useApp();
+  const canEditStage3Ref = canAction('rfi', 'editRfiStage4') || canAction('rfi', 'editRfiStage3');
   const canUploadClientSign = canAction('rfi', 'uploadRfiS4ClientSign');
   const canUploadComplete   = canAction('rfi', 'uploadRfiS4Complete');
 
@@ -202,9 +203,24 @@ export default function RfiStage4Modal({ rfi, onSave, onClose }) {
   const [ownerSignFiles, setOwnerSignFiles] = useState(
     Array.isArray(rfi.stage4OwnerSignFiles) ? rfi.stage4OwnerSignFiles : [],
   );
+  const [editingStage3Ref, setEditingStage3Ref] = useState(false);
+  const [stage3RefForm, setStage3RefForm] = useState({
+    inspectionDate: rfi.inspectionDate || '',
+    result: rfi.result || '',
+    stage3Note: rfi.stage3Note || '',
+    concretePourDate: rfi.concretePourDate || '',
+    brand: rfi.brand || '',
+    cementQty: rfi.cementQty || '',
+    cementUnit: rfi.cementUnit || '',
+    status7Day: rfi.status7Day || '',
+    status28Day: rfi.status28Day || '',
+    steelTestResult: rfi.steelTestResult || '',
+    soilTestResult: rfi.soilTestResult || '',
+  });
   const isUploadingDocuments = Object.values(uploadingSections).some(Boolean);
 
   const set = (field) => (e) => setForm(f => ({ ...f, [field]: e.target.value }));
+  const setStage3Ref = (field) => (e) => setStage3RefForm(prev => ({ ...prev, [field]: e.target.value }));
   const handleUploadingChange = (section, isUploading) => {
     setUploadingSections(prev => {
       if (prev[section] === isUploading) return prev;
@@ -262,6 +278,62 @@ export default function RfiStage4Modal({ rfi, onSave, onClose }) {
 
       <div className="mb-5 bg-purple-50 border border-purple-100 rounded-xl px-4 py-3">
         <div className="text-[10px] font-semibold text-purple-400 uppercase tracking-wider mb-2">Stage 3 Inspection Result (Reference)</div>
+        {canEditStage3Ref && (
+          <div className="mb-2 flex items-center gap-2">
+            {editingStage3Ref && (
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingStage3Ref(false);
+                  setStage3RefForm({
+                    inspectionDate: rfi.inspectionDate || '',
+                    result: rfi.result || '',
+                    stage3Note: rfi.stage3Note || '',
+                    concretePourDate: rfi.concretePourDate || '',
+                    brand: rfi.brand || '',
+                    cementQty: rfi.cementQty || '',
+                    cementUnit: rfi.cementUnit || '',
+                    status7Day: rfi.status7Day || '',
+                    status28Day: rfi.status28Day || '',
+                    steelTestResult: rfi.steelTestResult || '',
+                    soilTestResult: rfi.soilTestResult || '',
+                  });
+                }}
+                className="px-2.5 py-1 text-[10px] font-semibold text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 rounded-md transition-colors"
+              >
+                Cancel
+              </button>
+            )}
+            <button
+              type="button"
+              disabled={saving}
+              onClick={async () => {
+                if (!editingStage3Ref) {
+                  setEditingStage3Ref(true);
+                  return;
+                }
+                await persist({
+                  inspectionDate: stage3RefForm.inspectionDate || '',
+                  result: stage3RefForm.result || '',
+                  stage3Note: stage3RefForm.stage3Note || '',
+                  concretePourDate: stage3RefForm.concretePourDate || '',
+                  brand: stage3RefForm.brand || '',
+                  cementQty: stage3RefForm.cementQty || '',
+                  cementUnit: stage3RefForm.cementUnit || '',
+                  status7Day: stage3RefForm.status7Day || '',
+                  status28Day: stage3RefForm.status28Day || '',
+                  steelTestResult: stage3RefForm.steelTestResult || '',
+                  soilTestResult: stage3RefForm.soilTestResult || '',
+                  statusInsp: stage3RefForm.result || rfi.statusInsp || '',
+                });
+                setEditingStage3Ref(false);
+              }}
+              className="px-2.5 py-1 text-[10px] font-semibold text-white bg-purple-600 hover:bg-purple-700 disabled:opacity-50 rounded-md transition-colors"
+            >
+              {editingStage3Ref ? 'Save Stage 3' : 'Edit Stage 3'}
+            </button>
+          </div>
+        )}
         <div className="grid grid-cols-3 gap-4">
           <div>
             <div className="text-[10px] text-purple-400 font-semibold">Inspection Date</div>
@@ -282,6 +354,102 @@ export default function RfiStage4Modal({ rfi, onSave, onClose }) {
             <div className="text-[11px] text-purple-700 mt-0.5 line-clamp-2">{rfi.stage3Note || '—'}</div>
           </div>
         </div>
+        <div className="mt-3 rounded-lg border border-purple-200 bg-white/80 p-3">
+          <div className="mb-2 text-[10px] font-semibold text-purple-500 uppercase tracking-wider">6) Concrete / Material Test (if applicable)</div>
+          <div className="grid grid-cols-4 gap-3">
+            <div>
+              <div className="text-[10px] text-purple-400 font-semibold">Concrete Date</div>
+              <div className="text-xs text-purple-800 mt-0.5">{stage3RefForm.concretePourDate || '—'}</div>
+            </div>
+            <div>
+              <div className="text-[10px] text-purple-400 font-semibold">Brand</div>
+              <div className="text-xs text-purple-800 mt-0.5">{stage3RefForm.brand || '—'}</div>
+            </div>
+            <div>
+              <div className="text-[10px] text-purple-400 font-semibold">Actual Qty</div>
+              <div className="text-xs text-purple-800 mt-0.5">{stage3RefForm.cementQty || '—'}</div>
+            </div>
+            <div>
+              <div className="text-[10px] text-purple-400 font-semibold">Unit</div>
+              <div className="text-xs text-purple-800 mt-0.5">{stage3RefForm.cementUnit || '—'}</div>
+            </div>
+            <div>
+              <div className="text-[10px] text-purple-400 font-semibold">Status 7 Day</div>
+              <div className="text-xs text-purple-800 mt-0.5">{stage3RefForm.status7Day || '—'}</div>
+            </div>
+            <div>
+              <div className="text-[10px] text-purple-400 font-semibold">Status 28 Day</div>
+              <div className="text-xs text-purple-800 mt-0.5">{stage3RefForm.status28Day || '—'}</div>
+            </div>
+            <div>
+              <div className="text-[10px] text-purple-400 font-semibold">Steel Test</div>
+              <div className="text-xs text-purple-800 mt-0.5">{stage3RefForm.steelTestResult || '—'}</div>
+            </div>
+            <div>
+              <div className="text-[10px] text-purple-400 font-semibold">Soil Test</div>
+              <div className="text-xs text-purple-800 mt-0.5">{stage3RefForm.soilTestResult || '—'}</div>
+            </div>
+          </div>
+        </div>
+        {editingStage3Ref && (
+          <div className="mt-3 rounded-lg border border-purple-200 bg-white/80 p-3">
+            <FormGrid cols={3}>
+              <FormField label="Inspection Date">
+                <Input type="date" value={stage3RefForm.inspectionDate} onChange={setStage3Ref('inspectionDate')} />
+              </FormField>
+              <FormField label="Onsite Result">
+                <Select value={stage3RefForm.result} onChange={setStage3Ref('result')}>
+                  <option value="">— Select Result —</option>
+                  {RESULT_OPTIONS.map(r => <option key={r}>{r}</option>)}
+                </Select>
+              </FormField>
+              <FormField label="Inspector Note">
+                <Textarea value={stage3RefForm.stage3Note} onChange={setStage3Ref('stage3Note')} rows={2} />
+              </FormField>
+            </FormGrid>
+            <div className="mt-3 border-t border-purple-100 pt-3">
+              <div className="mb-2 text-[10px] font-semibold text-purple-500 uppercase tracking-wider">Concrete / Material Test (if applicable)</div>
+              <FormGrid cols={4}>
+                <FormField label="Concrete Date">
+                  <Input type="date" value={stage3RefForm.concretePourDate} onChange={setStage3Ref('concretePourDate')} />
+                </FormField>
+                <FormField label="Brand">
+                  <Input value={stage3RefForm.brand} onChange={setStage3Ref('brand')} />
+                </FormField>
+                <FormField label="Actual Qty">
+                  <Input type="number" min="0" step="any" value={stage3RefForm.cementQty} onChange={setStage3Ref('cementQty')} />
+                </FormField>
+                <FormField label="Unit">
+                  <Input value={stage3RefForm.cementUnit} onChange={setStage3Ref('cementUnit')} />
+                </FormField>
+                <FormField label="Status 7 Day">
+                  <Select value={stage3RefForm.status7Day} onChange={setStage3Ref('status7Day')}>
+                    <option value="">—</option>
+                    <option>Pass</option><option>Fail</option><option>Pending</option>
+                  </Select>
+                </FormField>
+                <FormField label="Status 28 Day">
+                  <Select value={stage3RefForm.status28Day} onChange={setStage3Ref('status28Day')}>
+                    <option value="">—</option>
+                    <option>Pass</option><option>Fail</option><option>Pending</option>
+                  </Select>
+                </FormField>
+                <FormField label="Steel Test">
+                  <Select value={stage3RefForm.steelTestResult} onChange={setStage3Ref('steelTestResult')}>
+                    <option value="">—</option>
+                    <option>Pass</option><option>Fail</option><option>N/A</option><option>Pending</option>
+                  </Select>
+                </FormField>
+                <FormField label="Soil Test">
+                  <Select value={stage3RefForm.soilTestResult} onChange={setStage3Ref('soilTestResult')}>
+                    <option value="">—</option>
+                    <option>Pass</option><option>Fail</option><option>N/A</option><option>Pending</option>
+                  </Select>
+                </FormField>
+              </FormGrid>
+            </div>
+          </div>
+        )}
         {Array.isArray(rfi.stage3InspectorFiles) && rfi.stage3InspectorFiles.length > 0 && (
           <div className="mt-2 pt-2 border-t border-purple-100">
             <div className="text-[10px] text-purple-400 font-semibold mb-1">Inspector Files (Stage 3)</div>
@@ -344,7 +512,7 @@ export default function RfiStage4Modal({ rfi, onSave, onClose }) {
                   stage: 4,
                   stage4Status: next,
                   statusDoc: next,
-                  statusInsp: rfi.result || rfi.statusInsp,
+                  statusInsp: stage3RefForm.result || rfi.result || rfi.statusInsp,
                   stage4ClientSignFiles: merged,
                 }, next);
               }}
@@ -412,7 +580,7 @@ export default function RfiStage4Modal({ rfi, onSave, onClose }) {
                 ...form,
                 stage4Status: workflowStatus || rfi.stage4Status || '',
                 statusDoc: workflowStatus || rfi.stage4Status || '',
-                statusInsp: rfi.result || rfi.statusInsp,
+                statusInsp: stage3RefForm.result || rfi.result || rfi.statusInsp,
               });
               onClose(); // Close modal after saving
             }}

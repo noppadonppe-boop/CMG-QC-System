@@ -165,6 +165,7 @@ export default function RfiStage3Modal({ rfi, onSave, onClose }) {
   const [inspectorFiles, setInspectorFiles] = useState(
     Array.isArray(rfi.stage3InspectorFiles) ? rfi.stage3InspectorFiles : [],
   );
+  const [inspectorRequiredError, setInspectorRequiredError] = useState('');
   const [cementBillFiles, setCementBillFiles] = useState(
     Array.isArray(rfi.cementBillFiles) ? rfi.cementBillFiles : [],
   );
@@ -230,6 +231,10 @@ export default function RfiStage3Modal({ rfi, onSave, onClose }) {
   function handleSubmit(e) {
     e.preventDefault();
     if (!form.inspectionDate || !form.result) return;
+    if (!inspectorFiles.length) {
+      setInspectorRequiredError('กรุณาอัปโหลดไฟล์ Inspector field information อย่างน้อย 1 ไฟล์');
+      return;
+    }
     onSave({
       ...form,
       stage3InspectorFiles: inspectorFiles,
@@ -338,13 +343,20 @@ export default function RfiStage3Modal({ rfi, onSave, onClose }) {
             placeholder="Describe findings, observations, non-conformances if any..." rows={4} />
         </FormField>
 
-        <FormField label="Inspector field information (Upload)">
+        <FormField label="Inspector field information (Upload)" required>
           <Stage3Uploader
             label={canUploadInspector ? 'เลือกไฟล์ Inspector info' : 'ไม่มีสิทธิ์อัปโหลด (ดูไฟล์เท่านั้น)'}
-            files={inspectorFiles} setFiles={setInspectorFiles}
+            files={inspectorFiles}
+            setFiles={(updater) => {
+              setInspectorRequiredError('');
+              setInspectorFiles(updater);
+            }}
             projectId={rfi.projectId} requestNo={rfi.requestNo}
             folder="inspector" disabled={!canUploadInspector}
           />
+          {inspectorRequiredError && (
+            <p className="mt-1 text-[11px] text-red-500">{inspectorRequiredError}</p>
+          )}
         </FormField>
 
         <div className="bg-slate-50 rounded-xl p-4 border border-slate-100">
@@ -359,7 +371,7 @@ export default function RfiStage3Modal({ rfi, onSave, onClose }) {
             <FormField label="BRAND (ปูนซีเมนต์)">
               <Input value={form.brand} onChange={set('brand')} placeholder="TPI / SCG..." />
             </FormField>
-            <FormField label="ปริมาณที่จองปูน">
+            <FormField label="ปริมาณที่เทจริง">
               <Input
                 type="number"
                 min="0"
@@ -475,7 +487,7 @@ export default function RfiStage3Modal({ rfi, onSave, onClose }) {
             className="px-4 py-2 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
             Cancel
           </button>
-          <button type="submit" disabled={!form.result}
+          <button type="submit" disabled={!form.result || !inspectorFiles.length}
             className="px-6 py-2 text-xs font-semibold text-white bg-purple-600 hover:bg-purple-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition-colors">
             Submit Inspection →
           </button>

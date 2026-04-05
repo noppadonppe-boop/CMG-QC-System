@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, Lock, RefreshCcw } from 'lucide-react';
+import { ChevronDown, GripVertical, Lock, RefreshCcw } from 'lucide-react';
 
-function readHiddenKeys(storageKey, fallback = []) {
+function readStorageArray(storageKey, fallback = []) {
   if (typeof window === 'undefined') return fallback;
   try {
     const raw = window.localStorage.getItem(storageKey);
@@ -13,16 +13,30 @@ function readHiddenKeys(storageKey, fallback = []) {
   }
 }
 
+function mergeOrderWithColumns(columns, storedOrder) {
+  const columnKeys = columns.map(col => col.key);
+  const known = storedOrder.filter(key => columnKeys.includes(key));
+  const missing = columnKeys.filter(key => !known.includes(key));
+  return [...known, ...missing];
+}
+
 export function useColumnVisibility(storageKey, columns) {
+  const orderKey = `${storageKey}:order`;
   const lockedKeys = useMemo(() => columns.filter(col => col.locked).map(col => col.key), [columns]);
   const defaultHidden = useMemo(() => columns.filter(col => col.defaultHidden).map(col => col.key), [columns]);
+
   const [hiddenKeys, setHiddenKeys] = useState(() => {
-    const stored = readHiddenKeys(storageKey, defaultHidden);
+    const stored = readStorageArray(storageKey, defaultHidden);
     return stored.filter(key => columns.some(col => col.key === key && !col.locked));
+  });
+  const [orderedKeys, setOrderedKeys] = useState(() => {
+    const stored = readStorageArray(orderKey, columns.map(col => col.key));
+    return mergeOrderWithColumns(columns, stored);
   });
 
   useEffect(() => {
     setHiddenKeys(prev => prev.filter(key => columns.some(col => col.key === key && !col.locked)));
+    setOrderedKeys(prev => mergeOrderWithColumns(columns, prev));
   }, [columns]);
 
   useEffect(() => {
@@ -30,10 +44,19 @@ export function useColumnVisibility(storageKey, columns) {
     window.localStorage.setItem(storageKey, JSON.stringify(hiddenKeys));
   }, [hiddenKeys, storageKey]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(orderKey, JSON.stringify(orderedKeys));
+  }, [orderedKeys, orderKey]);
+
   const hiddenSet = useMemo(() => new Set(hiddenKeys), [hiddenKeys]);
+  const orderedColumns = useMemo(() => {
+    const byKey = new Map(columns.map(col => [col.key, col]));
+    return orderedKeys.map(key => byKey.get(key)).filter(Boolean);
+  }, [columns, orderedKeys]);
   const visibleColumns = useMemo(
-    () => columns.filter(col => !hiddenSet.has(col.key)),
-    [columns, hiddenSet],
+    () => orderedColumns.filter(col => !hiddenSet.has(col.key)),
+    [orderedColumns, hiddenSet],
   );
 
   const totalCount = columns.length;
@@ -46,17 +69,34 @@ export function useColumnVisibility(storageKey, columns) {
     ));
   }
 
+  function moveColumn(fromKey, toKey) {
+    if (!fromKey || !toKey || fromKey === toKey) return;
+    setOrderedKeys(prev => {
+      const fromIndex = prev.indexOf(fromKey);
+      const toIndex = prev.indexOf(toKey);
+      if (fromIndex < 0 || toIndex < 0) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved);
+      return next;
+    });
+  }
+
   function reset() {
     setHiddenKeys(defaultHidden.filter(key => !lockedKeys.includes(key)));
+    setOrderedKeys(columns.map(col => col.key));
   }
 
   return {
     columns,
-    hiddenSet,
+    orderedKeys,
+    orderedColumns,
     visibleColumns,
+    hiddenSet,
     visibleCount,
     totalCount,
     toggle,
+    moveColumn,
     reset,
   };
 }
@@ -70,7 +110,9 @@ export default function TableColumnVisibility({
 }) {
   const menuRef = useRef(null);
   const [open, setOpen] = useState(false);
-  const { hiddenSet, visibleCount, totalCount, toggle, reset } = useColumnVisibility(storageKey, columns);
+  const [draggingKey, setDraggingKey] = useState('');
+  const { columns: allColumns, orderedKeys, orderedColumns, visibleColumns, hiddenSet, visibleCount, totalCount, toggle, moveColumn, reset } =
+    useColumnVisibility(storageKey, columns);
 
   useEffect(() => {
     function onDocClick(e) {
@@ -87,19 +129,32 @@ export default function TableColumnVisibility({
     };
   }, []);
 
-  const hiddenIndices = columns
-    .map((col, idx) => (hiddenSet.has(col.key) ? idx + 1 : null))
-    .filter(Boolean);
+  function onDropColumn(targetKey) {
+    if (!draggingKey) return;
+    moveColumn(draggingKey, targetKey);
+    setDraggingKey('');
+  }
 
-  const columnCss = hiddenIndices.length
-    ? hiddenIndices
-        .map(idx => `
-          table[data-column-table="${tableId}"] tr > *:nth-child(${idx}) {
-            display: none !important;
-          }
-        `)
-        .join('\n')
-    : '';
+  useEffect(() => {
+    const table = document.querySelector(`table[data-column-table="${tableId}"]`);
+    if (!table) return;
+
+    const originalIndexByKey = new Map(allColumns.map((col, idx) => [col.key, idx]));
+    const rows = table.querySelectorAll('tr');
+
+    rows.forEach((row) => {
+      const cells = Array.from(row.children);
+      if (cells.length !== allColumns.length) return;
+
+      orderedKeys.forEach((key) => {
+        const originalIndex = originalIndexByKey.get(key);
+        const cell = cells[originalIndex];
+        if (!cell) return;
+        cell.style.display = hiddenSet.has(key) ? 'none' : '';
+        row.appendChild(cell);
+      });
+    });
+  }, [allColumns, orderedKeys, hiddenSet, tableId]);
 
   return (
     <div className="relative">
@@ -122,7 +177,7 @@ export default function TableColumnVisibility({
             <div className="mb-2 flex items-center justify-between">
               <div>
                 <div className="text-xs font-bold text-slate-800">แสดง/ซ่อน คอลัมน์</div>
-                <div className="text-[11px] text-slate-500">เลือกคอลัมน์ที่ต้องการแสดงในตารางนี้</div>
+                <div className="text-[11px] text-slate-500">ติ๊กเพื่อแสดง/ซ่อน และลากเพื่อเรียงคอลัมน์</div>
               </div>
               <button
                 type="button"
@@ -133,16 +188,25 @@ export default function TableColumnVisibility({
               </button>
             </div>
             <div className="max-h-64 space-y-1 overflow-y-auto pr-1">
-              {columns.map(col => {
+              {orderedColumns.map(col => {
                 const checked = !hiddenSet.has(col.key);
                 const locked = !!col.locked;
+                const dragging = draggingKey === col.key;
                 return (
-                  <label
+                  <div
                     key={col.key}
+                    draggable={!locked}
+                    onDragStart={() => !locked && setDraggingKey(col.key)}
+                    onDragEnd={() => setDraggingKey('')}
+                    onDragOver={(e) => {
+                      if (!locked) e.preventDefault();
+                    }}
+                    onDrop={() => !locked && onDropColumn(col.key)}
                     className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm ${
-                      locked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-slate-50'
-                    }`}
+                      locked ? 'cursor-not-allowed opacity-60' : 'cursor-grab hover:bg-slate-50'
+                    } ${dragging ? 'opacity-40' : ''}`}
                   >
+                    <GripVertical size={13} className={locked ? 'text-slate-300' : 'text-slate-400'} />
                     <input
                       type="checkbox"
                       checked={checked}
@@ -154,16 +218,15 @@ export default function TableColumnVisibility({
                       {col.label}
                     </span>
                     {locked && <Lock size={12} className="text-slate-300" />}
-                  </label>
+                  </div>
                 );
               })}
             </div>
           </div>
         )}
       </div>
-      <style>{columnCss}</style>
       <div className={className}>
-        {children}
+        {typeof children === 'function' ? children({ visibleColumns, orderedColumns, tableId }) : children}
       </div>
     </div>
   );

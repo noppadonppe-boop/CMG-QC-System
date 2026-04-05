@@ -89,6 +89,7 @@ const RFI_TABLE_COLUMNS = [
   { key: 'rfiNo', label: 'RFI No.' },
   { key: 'requestNo', label: 'Request No.' },
   { key: 'type', label: 'Type' },
+  { key: 'tagNo', label: 'Tag No.' },
   { key: 'location', label: 'Location' },
   { key: 'area', label: 'Area', defaultHidden: true },
   { key: 'requestDateInternal', label: 'Stage 1 Request Date (Internal)', defaultHidden: true },
@@ -613,6 +614,13 @@ export default function RfiPage() {
     setStage2Modal(null);
   }
 
+  function handleSaveStage2Draft(form) {
+    if (!stage2Modal) return;
+    // Save current values without forcing stage transition.
+    updateRfi(stage2Modal.id, { ...form });
+    setStage2Modal(null);
+  }
+
   function handleSaveStage3(form) {
     // Check if result is 'Comment' - if so, move back to Stage 2 and reset email status
     if (form.result === 'Comment') {
@@ -905,6 +913,7 @@ export default function RfiPage() {
                       <td className={`px-3 py-2 font-mono font-bold whitespace-nowrap text-sm ${concreteAlerts.hasPendingAlert ? 'text-red-800' : 'text-slate-800'}`}>{rfi.rfiNo}</td>
                       <td className={`px-3 py-2 font-mono whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.requestNo}</td>
                       <td className={`px-3 py-2 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-700'}`}>{rfi.typeOfInspection}</td>
+                      <td className={`px-3 py-2 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.tagNo || '—'}</td>
                       <td className={`px-3 py-2 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.location || '—'}</td>
                       <td className={`px-3 py-2 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.area || '—'}</td>
                       <td className={`px-3 py-2 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.requestDateInternal || '—'}</td>
@@ -1076,6 +1085,7 @@ export default function RfiPage() {
         <RfiStage2Modal
           rfi={stage2Modal}
           onSave={handleSaveStage2}
+          onSaveDraft={handleSaveStage2Draft}
           onClose={() => setStage2Modal(null)}
         />
       )}

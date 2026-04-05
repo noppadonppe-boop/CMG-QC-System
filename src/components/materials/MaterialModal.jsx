@@ -1,7 +1,13 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
+import {
+  ref as storageRef,
+  uploadBytesResumable,
+  getDownloadURL,
+} from 'firebase/storage';
 import Modal from '../common/Modal';
 import { FormField, Input, Select, Textarea, FormGrid } from '../common/FormField';
 import { useApp } from '../../context/AppContext';
+import { storage } from '../../config/firebase';
 
 const RESULT_OPTIONS = [
   'Approved (AP)',
@@ -50,13 +56,29 @@ function ReadonlyField({ label, value }) {
 const EMPTY = {
   matRevNo: '', documentNo: '', rev: '', vendorBrand: '', receiveDate: '', description: '', category: 'Structural Steel',
   materialSpecPackage: '', supplier: '', quantity: '', unit: '',
-  result: 'Approved (AP)', includeTestResult: false, testCertLink: '', approvedDocLink: '', approveDate: getTodayDate(), noteOfTest: '',
+  result: 'Approved (AP)', includeTestResult: false, receiveRfiFiles: [], approvedDocLink: '', approvedDocFiles: [], approveDate: getTodayDate(), noteOfTest: '',
   materialReceived: '', linkedRfiId: '', linkedRfiLabel: '',
 };
 
 export default function MaterialModal({ item, onSave, onClose }) {
   const { rfiItems, selectedProjectId } = useApp();
   const [form, setForm] = useState(item ? { ...EMPTY, ...item, approveDate: item.approveDate || getTodayDate() } : { ...EMPTY });
+  const [receiveRfiFiles, setReceiveRfiFiles] = useState(
+    Array.isArray(item?.receiveRfiFiles) ? item.receiveRfiFiles : []
+  );
+  const [approvedDocFiles, setApprovedDocFiles] = useState(() => {
+    if (Array.isArray(item?.approvedDocFiles) && item.approvedDocFiles.length > 0) return item.approvedDocFiles;
+    if (item?.approvedDocLink) return [{ name: 'Approved document', url: item.approvedDocLink }];
+    return [];
+  });
+  const uploadRef = useRef(null);
+  const approvedDocUploadRef = useRef(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadError, setUploadError] = useState('');
+  const [approvedUploading, setApprovedUploading] = useState(false);
+  const [approvedUploadProgress, setApprovedUploadProgress] = useState(0);
+  const [approvedUploadError, setApprovedUploadError] = useState('');
   const set = (field) => (e) => setForm(f => ({ ...f, [field]: e.target.value }));
   const setCheck = (field) => (e) => setForm(f => ({ ...f, [field]: e.target.checked }));
   const setMaterialReceived = (e) => {
@@ -99,7 +121,94 @@ export default function MaterialModal({ item, onSave, onClose }) {
   function handleSubmit(e) {
     e.preventDefault();
     if (!(form.matRevNo || '').trim() || !(form.description || '').trim()) return;
-    onSave(form);
+    onSave({
+      ...form,
+      receiveRfiFiles,
+      approvedDocFiles,
+      approvedDocLink: approvedDocFiles[0]?.url || form.approvedDocLink || '',
+    });
+  }
+
+  async function handleReceiveRfiFiles(fileList) {
+    if (!selectedProjectId) {
+      setUploadError('ไม่พบโครงการ กรุณาเลือกโครงการก่อนอัปโหลดไฟล์');
+      return;
+    }
+    setUploadError('');
+    setUploading(true);
+    const keyBase = (form.matRevNo || `draft-${Date.now()}`).replace(/[/\\#?]/g, '-');
+    const results = [];
+    try {
+      for (let i = 0; i < fileList.length; i++) {
+        const file = fileList[i];
+        const seq = receiveRfiFiles.length + results.length + 1;
+        const ext = file.name.includes('.') ? file.name.split('.').pop() : 'bin';
+        const path = `materials-receive-rfi/${selectedProjectId}/${keyBase}/receive_rfi_${String(seq).padStart(2, '0')}.${ext}`;
+        const sRef = storageRef(storage, path);
+        const task = uploadBytesResumable(sRef, file);
+        await new Promise((resolve, reject) => {
+          task.on('state_changed',
+            snap => setUploadProgress(Math.round((snap.bytesTransferred / snap.totalBytes) * 100)),
+            reject,
+            () => resolve(),
+          );
+        });
+        const url = await getDownloadURL(task.snapshot.ref);
+        results.push({ name: file.name, url });
+      }
+      setReceiveRfiFiles(prev => [...prev, ...results]);
+    } catch (err) {
+      setUploadError(err?.message || 'อัปโหลดไฟล์ไม่สำเร็จ');
+    } finally {
+      setUploading(false);
+      setUploadProgress(0);
+      if (uploadRef.current) uploadRef.current.value = '';
+    }
+  }
+
+  function removeReceiveRfiFile(idx) {
+    setReceiveRfiFiles(prev => prev.filter((_, i) => i !== idx));
+  }
+
+  async function handleApprovedDocFiles(fileList) {
+    if (!selectedProjectId) {
+      setApprovedUploadError('ไม่พบโครงการ กรุณาเลือกโครงการก่อนอัปโหลดไฟล์');
+      return;
+    }
+    setApprovedUploadError('');
+    setApprovedUploading(true);
+    const keyBase = (form.matRevNo || `draft-${Date.now()}`).replace(/[/\\#?]/g, '-');
+    const results = [];
+    try {
+      for (let i = 0; i < fileList.length; i++) {
+        const file = fileList[i];
+        const seq = approvedDocFiles.length + results.length + 1;
+        const ext = file.name.includes('.') ? file.name.split('.').pop() : 'bin';
+        const path = `materials-approved-doc/${selectedProjectId}/${keyBase}/approved_doc_${String(seq).padStart(2, '0')}.${ext}`;
+        const sRef = storageRef(storage, path);
+        const task = uploadBytesResumable(sRef, file);
+        await new Promise((resolve, reject) => {
+          task.on('state_changed',
+            snap => setApprovedUploadProgress(Math.round((snap.bytesTransferred / snap.totalBytes) * 100)),
+            reject,
+            () => resolve(),
+          );
+        });
+        const url = await getDownloadURL(task.snapshot.ref);
+        results.push({ name: file.name, url });
+      }
+      setApprovedDocFiles(prev => [...prev, ...results]);
+    } catch (err) {
+      setApprovedUploadError(err?.message || 'อัปโหลดไฟล์ไม่สำเร็จ');
+    } finally {
+      setApprovedUploading(false);
+      setApprovedUploadProgress(0);
+      if (approvedDocUploadRef.current) approvedDocUploadRef.current.value = '';
+    }
+  }
+
+  function removeApprovedDocFile(idx) {
+    setApprovedDocFiles(prev => prev.filter((_, i) => i !== idx));
   }
 
   const isEdit = !!item;
@@ -179,11 +288,11 @@ export default function MaterialModal({ item, onSave, onClose }) {
           </div>
         </div>
 
-        {/* ── Section 3: Test & Result ── */}
+        {/* ── Section 3: Approve ── */}
         <div>
           <div className="flex items-center gap-2 mb-3">
             <div className="w-5 h-5 rounded-full bg-teal-500 text-white flex items-center justify-center text-[10px] font-bold shrink-0">3</div>
-            <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Test & Approval</h3>
+            <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Approve</h3>
           </div>
 
           {/* Result radio cards */}
@@ -215,44 +324,40 @@ export default function MaterialModal({ item, onSave, onClose }) {
             </div>
           </FormField>
 
-          <div className="mt-4">
-            <label className="flex items-center gap-2.5 cursor-pointer w-fit group">
-              <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-all ${
-                form.includeTestResult
-                  ? 'bg-teal-500 border-teal-500'
-                  : 'bg-white border-slate-300 group-hover:border-teal-400'
-              }`}>
-                {form.includeTestResult && <span className="text-white text-[10px]">✓</span>}
-              </div>
-              <input
-                type="checkbox"
-                checked={form.includeTestResult}
-                onChange={setCheck('includeTestResult')}
-                className="hidden"
-              />
-              <span className="text-xs font-semibold text-slate-700">Include Test Result Document</span>
-            </label>
-          </div>
-
-          {form.includeTestResult && (
-            <div className="mt-3">
-              <FormField label="Test Certificate / Link">
-                <Input
-                  value={form.testCertLink || ''}
-                  onChange={set('testCertLink')}
-                  placeholder="https://drive.google.com/..."
-                />
-              </FormField>
-            </div>
-          )}
-
           <FormGrid cols={2} className="mt-4">
-            <FormField label="Approved Document Link">
-              <Input
-                value={form.approvedDocLink || ''}
-                onChange={set('approvedDocLink')}
-                placeholder="https://drive.google.com/approved-doc"
-              />
+            <FormField label="Approved Document Upload">
+              <div className="space-y-2">
+                {approvedDocFiles.length > 0 && (
+                  <div className="space-y-1">
+                    {approvedDocFiles.map((f, i) => (
+                      <div key={i} className="flex items-center gap-2 px-2 py-1 bg-teal-50 border border-teal-100 rounded-lg text-[11px]">
+                        <a href={f.url} target="_blank" rel="noopener noreferrer" className="text-teal-700 hover:underline truncate flex-1">
+                          {f.name}
+                        </a>
+                        <button type="button" onClick={() => removeApprovedDocFile(i)} className="text-red-400 hover:text-red-600">
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => approvedDocUploadRef.current?.click()}
+                  disabled={approvedUploading}
+                  className="flex items-center gap-2 px-3 py-2 text-[11px] font-medium text-slate-600 border border-dashed border-slate-300 rounded-lg hover:border-teal-400 hover:text-teal-700 hover:bg-teal-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {approvedUploading ? `อัปโหลด... ${approvedUploadProgress}%` : 'เลือกไฟล์เอกสารอนุมัติ'}
+                </button>
+                <input
+                  ref={approvedDocUploadRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={e => e.target.files && handleApprovedDocFiles(e.target.files)}
+                />
+                {approvedUploadError && <p className="text-[10px] text-red-500">{approvedUploadError}</p>}
+              </div>
             </FormField>
             <FormField label="Approve Date">
               <Input
@@ -320,6 +425,64 @@ export default function MaterialModal({ item, onSave, onClose }) {
             <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2">
               <div className="text-[11px] font-semibold text-emerald-700">Selected RFI</div>
               <div className="text-xs text-emerald-800">{form.linkedRfiLabel}</div>
+            </div>
+          )}
+
+          <div className="mt-4">
+            <label className="flex items-center gap-2.5 cursor-pointer w-fit group">
+              <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-all ${
+                form.includeTestResult
+                  ? 'bg-teal-500 border-teal-500'
+                  : 'bg-white border-slate-300 group-hover:border-teal-400'
+              }`}>
+                {form.includeTestResult && <span className="text-white text-[10px]">✓</span>}
+              </div>
+              <input
+                type="checkbox"
+                checked={form.includeTestResult}
+                onChange={setCheck('includeTestResult')}
+                className="hidden"
+              />
+              <span className="text-xs font-semibold text-slate-700">Include Test Result Document</span>
+            </label>
+          </div>
+
+          {form.includeTestResult && (
+            <div className="mt-3">
+              <FormField label="Upload Receive RFI">
+                <div className="space-y-2">
+                  {receiveRfiFiles.length > 0 && (
+                    <div className="space-y-1">
+                      {receiveRfiFiles.map((f, i) => (
+                        <div key={i} className="flex items-center gap-2 px-2 py-1 bg-teal-50 border border-teal-100 rounded-lg text-[11px]">
+                          <a href={f.url} target="_blank" rel="noopener noreferrer" className="text-teal-700 hover:underline truncate flex-1">
+                            {f.name}
+                          </a>
+                          <button type="button" onClick={() => removeReceiveRfiFile(i)} className="text-red-400 hover:text-red-600">
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => uploadRef.current?.click()}
+                    disabled={uploading}
+                    className="flex items-center gap-2 px-3 py-2 text-[11px] font-medium text-slate-600 border border-dashed border-slate-300 rounded-lg hover:border-teal-400 hover:text-teal-700 hover:bg-teal-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {uploading ? `อัปโหลด... ${uploadProgress}%` : 'เลือกไฟล์ (หลายไฟล์)'}
+                  </button>
+                  <input
+                    ref={uploadRef}
+                    type="file"
+                    multiple
+                    className="hidden"
+                    onChange={e => e.target.files && handleReceiveRfiFiles(e.target.files)}
+                  />
+                  {uploadError && <p className="text-[10px] text-red-500">{uploadError}</p>}
+                </div>
+              </FormField>
             </div>
           )}
 

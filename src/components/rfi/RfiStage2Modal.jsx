@@ -5,7 +5,7 @@ import {
   getDownloadURL,
 } from 'firebase/storage';
 import Modal from '../common/Modal';
-import { FormField, Input, Textarea, FormGrid, Select } from '../common/FormField';
+import { FormField, Input, Textarea, FormGrid } from '../common/FormField';
 import { storage } from '../../config/firebase';
 import { Upload, X, Loader2, FileText, FileSpreadsheet, Image, Pencil, Check } from 'lucide-react';
 
@@ -53,27 +53,92 @@ function ReferDrawingThumb({ file }) {
   );
 }
 
-const STAGE2_WORKSTEP_DEFAULTS = [
-  'Civil-Excuation / Lean',
-  'Civil-From work / Install rebar / Before Pouring /',
-  'Civil-After pouring',
-  'Civil-Backfilling',
-  'Civil-Compassive Strenge Test',
-  'Structure-Fit- up',
-  'Structure-Welding VT',
-  'Structure-Welding PT',
-  'Structure-Welding MT',
-  'Structure-Welding RT',
-  'Painting-Sand blast',
-  'Painting-Primer',
-  'Painting-Top coat',
-  'Installation-Alignment',
-  'Installation-Torque Bolt',
-  'Installation-Welding',
-  'Installation-Grouting',
-];
+const STAGE1_RENDERED_KEYS = new Set([
+  'requestNo',
+  'rfiNo',
+  'tagNo',
+  'typeOfInspection',
+  'requestDateInternal',
+  'requestTimeInternal',
+  'dueDate',
+  'requestDateOwner',
+  'requestTimeOwner',
+  'requestedBy',
+  'inspectedBy',
+  'statusInsp',
+  'statusDoc',
+  'workingStep',
+  'structureType',
+  'location',
+  'area',
+  'detailInspection',
+  'referDrawing',
+  'referDrawingFiles',
+  'brand',
+  'cementQty',
+  'cementUnit',
+  'concretePourDate',
+]);
 
-export default function RfiStage2Modal({ rfi, onSave, onClose }) {
+const STAGE1_SKIP_KEYS = new Set([
+  'id',
+  'sn',
+  'projectId',
+  'stage',
+  'createdAt',
+  'updatedAt',
+  'issueDate',
+  'inspectionPackage',
+  'descriptionOfInspection',
+  'stage2EmailStatus',
+  'stage2Note',
+  'stage2Files',
+  'inspectionScheduleDate',
+  'inspectionScheduleTime',
+  'inspectionDate',
+  'result',
+  'stage3Note',
+  'stage3Attachment',
+  'stage3InspectorFiles',
+  'stage4Result',
+  'stage4Note',
+  'stage4Status',
+  'stage4Attachment',
+  'stage4ClientSignFiles',
+  'stage4CompleteFiles',
+  'stage4OwnerSignFiles',
+  'stage4Progress',
+]);
+
+function hasDisplayValue(value) {
+  return value !== null && value !== undefined && String(value).trim() !== '';
+}
+
+function formatFieldLabel(key) {
+  if (key === 'rfiNo') return 'RFI No.';
+  return key
+    .replace(/([A-Z])/g, ' $1')
+    .replace(/^./, (c) => c.toUpperCase())
+    .trim();
+}
+
+function getAdditionalStage1Fields(rfi) {
+  return Object.entries(rfi || {})
+    .filter(([key, value]) => {
+      if (STAGE1_RENDERED_KEYS.has(key) || STAGE1_SKIP_KEYS.has(key)) return false;
+      if (key.startsWith('stage2') || key.startsWith('stage3') || key.startsWith('stage4')) return false;
+      if (Array.isArray(value)) return false;
+      if (typeof value === 'object' && value !== null) return false;
+      return hasDisplayValue(value);
+    })
+    .map(([key, value]) => ({
+      key,
+      label: formatFieldLabel(key),
+      value: typeof value === 'boolean' ? (value ? 'Yes' : 'No') : String(value),
+    }));
+}
+
+export default function RfiStage2Modal({ rfi, onSave, onSaveDraft, onClose }) {
   const [form, setForm] = useState({
     rfiNo:                   rfi.rfiNo                   || '',
     descriptionOfInspection: rfi.descriptionOfInspection || '',
@@ -82,21 +147,18 @@ export default function RfiStage2Modal({ rfi, onSave, onClose }) {
     stage2Files:             Array.isArray(rfi.stage2Files) ? rfi.stage2Files : [],
   });
   const [stage2Files, setStage2Files] = useState(form.stage2Files);
-  const [workstepOptions, setWorkstepOptions] = useState(() => {
-    const base = [...STAGE2_WORKSTEP_DEFAULTS];
-    const current = (rfi?.inspectionPackage || '').trim();
-    if (current && !base.includes(current)) base.unshift(current);
-    return base;
-  });
+  const [, setWorkstepOptions] = useState([]);
   const inputRef = useRef(null);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [errorMsg, setErrorMsg] = useState('');
+  const additionalStage1Fields = getAdditionalStage1Fields(rfi);
 
   // ── Stage 1 inline edit state ──
   const [editingStage1, setEditingStage1] = useState(false);
   const [stage1Form, setStage1Form] = useState({
     requestNo:            rfi.requestNo            || '',
+    tagNo:                rfi.tagNo                || '',
     typeOfInspection:     rfi.typeOfInspection     || '',
     requestDateInternal:  rfi.requestDateInternal  || '',
     requestTimeInternal:  rfi.requestTimeInternal  || '',
@@ -104,12 +166,18 @@ export default function RfiStage2Modal({ rfi, onSave, onClose }) {
     requestDateOwner:     rfi.requestDateOwner     || '',
     requestTimeOwner:     rfi.requestTimeOwner     || '',
     requestedBy:          rfi.requestedBy          || '',
+    inspectedBy:          rfi.inspectedBy          || '',
     statusInsp:           rfi.statusInsp           || '',
     statusDoc:            rfi.statusDoc            || '',
     workingStep:          rfi.workingStep          || '',
+    structureType:        rfi.structureType        || '',
     location:             rfi.location             || '',
     area:                 rfi.area                 || '',
     detailInspection:     rfi.detailInspection     || '',
+    concretePourDate:     rfi.concretePourDate     || '',
+    brand:                rfi.brand                || '',
+    cementQty:            rfi.cementQty            || '',
+    cementUnit:           rfi.cementUnit           || '',
   });
   const setS1 = (field) => (e) => setStage1Form(f => ({ ...f, [field]: e.target.value }));
 
@@ -183,6 +251,15 @@ export default function RfiStage2Modal({ rfi, onSave, onClose }) {
     onSave({ ...stage1Updates, ...form, stage2Files });
   }
 
+  function handleSaveDraft() {
+    const stage1Updates = editingStage1 ? { ...stage1Form } : {};
+    if (onSaveDraft) {
+      onSaveDraft({ ...stage1Updates, ...form, stage2Files });
+      return;
+    }
+    onSave({ ...stage1Updates, ...form, stage2Files });
+  }
+
   return (
     <Modal title={`Issue RFI to Client — Stage 2 (${rfi.rfiNo})`} onClose={onClose} size="lg">
       {/* Stage 1 summary — read-only or editable */}
@@ -212,7 +289,7 @@ export default function RfiStage2Modal({ rfi, onSave, onClose }) {
         {editingStage1 ? (
           /* ── Editable Stage 1 fields ── */
           <div className="space-y-3">
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-4 gap-3">
               <div className="flex flex-col gap-0.5">
                 <label className="text-[10px] font-semibold text-slate-500">Request No.</label>
                 <input className="w-full px-2 py-1.5 text-[11px] border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-400 text-slate-700 bg-white"
@@ -227,8 +304,13 @@ export default function RfiStage2Modal({ rfi, onSave, onClose }) {
                 <input className="w-full px-2 py-1.5 text-[11px] border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-400 text-slate-700 bg-white"
                   value={stage1Form.typeOfInspection} onChange={setS1('typeOfInspection')} />
               </div>
+              <div className="flex flex-col gap-0.5">
+                <label className="text-[10px] font-semibold text-slate-500">Tag No.</label>
+                <input className="w-full px-2 py-1.5 text-[11px] border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-400 text-slate-700 bg-white"
+                  value={stage1Form.tagNo} onChange={setS1('tagNo')} />
+              </div>
             </div>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-4 gap-3">
               <div className="flex flex-col gap-0.5">
                 <label className="text-[10px] font-semibold text-slate-500">Request Date (Internal)</label>
                 <input type="date" className="w-full px-2 py-1.5 text-[11px] border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-400 text-slate-700 bg-white"
@@ -261,6 +343,11 @@ export default function RfiStage2Modal({ rfi, onSave, onClose }) {
                 <input className="w-full px-2 py-1.5 text-[11px] border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-400 text-slate-700 bg-white"
                   value={stage1Form.requestedBy} onChange={setS1('requestedBy')} />
               </div>
+              <div className="flex flex-col gap-0.5">
+                <label className="text-[10px] font-semibold text-slate-500">Inspected By</label>
+                <input className="w-full px-2 py-1.5 text-[11px] border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-400 text-slate-700 bg-white"
+                  value={stage1Form.inspectedBy} onChange={setS1('inspectedBy')} />
+              </div>
             </div>
             <div className="grid grid-cols-3 gap-3">
               <div className="flex flex-col gap-0.5">
@@ -290,11 +377,42 @@ export default function RfiStage2Modal({ rfi, onSave, onClose }) {
                 <input className="w-full px-2 py-1.5 text-[11px] border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-400 text-slate-700 bg-white"
                   value={stage1Form.area} onChange={setS1('area')} />
               </div>
+              <div className="flex flex-col gap-0.5">
+                <label className="text-[10px] font-semibold text-slate-500">Structure Type</label>
+                <input className="w-full px-2 py-1.5 text-[11px] border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-400 text-slate-700 bg-white"
+                  value={stage1Form.structureType} onChange={setS1('structureType')} />
+              </div>
             </div>
             <div className="flex flex-col gap-0.5">
               <label className="text-[10px] font-semibold text-slate-500">Detail of Inspection</label>
               <textarea className="w-full px-2 py-1.5 text-[11px] border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-400 text-slate-700 bg-white resize-none" rows={2}
                 value={stage1Form.detailInspection} onChange={setS1('detailInspection')} />
+            </div>
+
+            <div>
+              <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider block mb-1">Concrete / Material</span>
+              <div className="grid grid-cols-4 gap-3">
+                <div className="flex flex-col gap-0.5">
+                  <label className="text-[10px] font-semibold text-slate-500">Concrete Date</label>
+                  <input type="date" className="w-full px-2 py-1.5 text-[11px] border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-400 text-slate-700 bg-white"
+                    value={stage1Form.concretePourDate} onChange={setS1('concretePourDate')} />
+                </div>
+                <div className="flex flex-col gap-0.5">
+                  <label className="text-[10px] font-semibold text-slate-500">Brand</label>
+                  <input className="w-full px-2 py-1.5 text-[11px] border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-400 text-slate-700 bg-white"
+                    value={stage1Form.brand} onChange={setS1('brand')} />
+                </div>
+                <div className="flex flex-col gap-0.5">
+                  <label className="text-[10px] font-semibold text-slate-500">Cement Qty</label>
+                  <input type="number" min="0" step="any" className="w-full px-2 py-1.5 text-[11px] border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-400 text-slate-700 bg-white"
+                    value={stage1Form.cementQty} onChange={setS1('cementQty')} />
+                </div>
+                <div className="flex flex-col gap-0.5">
+                  <label className="text-[10px] font-semibold text-slate-500">Unit</label>
+                  <input className="w-full px-2 py-1.5 text-[11px] border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-400 text-slate-700 bg-white"
+                    value={stage1Form.cementUnit} onChange={setS1('cementUnit')} />
+                </div>
+              </div>
             </div>
 
             {/* Refer Drawing (read-only thumbnails — files not re-editable here) */}
@@ -332,6 +450,7 @@ export default function RfiStage2Modal({ rfi, onSave, onClose }) {
               <span className="block mb-0.5">RFI No.:</span>
               <Input value={form.rfiNo} onChange={set('rfiNo')} className="h-6 text-[10px] px-2 py-0" />
             </div>
+            <div>Tag No.: <span className="font-semibold text-slate-800">{rfi.tagNo || '—'}</span></div>
             <div>Type of Inspection: <span className="font-semibold text-slate-800">{rfi.typeOfInspection}</span></div>
 
             <div>Request Date (Internal): <span className="font-semibold text-slate-800">{rfi.requestDateInternal || '—'}</span></div>
@@ -341,10 +460,12 @@ export default function RfiStage2Modal({ rfi, onSave, onClose }) {
             <div>Request Date (Owner): <span className="font-semibold text-slate-800">{rfi.requestDateOwner || '—'}</span></div>
             <div>Request Time (Owner): <span className="font-semibold text-slate-800">{rfi.requestTimeOwner || '—'}</span></div>
             <div>Requested By: <span className="font-semibold text-slate-800">{rfi.requestedBy || '—'}</span></div>
+            <div>Inspected By: <span className="font-semibold text-slate-800">{rfi.inspectedBy || '—'}</span></div>
 
             <div>Status Insp.: <span className="font-semibold text-slate-800">{rfi.statusInsp || '—'}</span></div>
             <div>Status Doc: <span className="font-semibold text-slate-800">{rfi.statusDoc || '—'}</span></div>
             <div>Working Step: <span className="font-semibold text-slate-800">{rfi.workingStep || '—'}</span></div>
+            <div>Structure Type: <span className="font-semibold text-slate-800">{rfi.structureType || '—'}</span></div>
 
             <div>Location: <span className="font-semibold text-slate-800">{rfi.location || '—'}</span></div>
             <div>Area: <span className="font-semibold text-slate-800">{rfi.area || '—'}</span></div>
@@ -384,6 +505,18 @@ export default function RfiStage2Modal({ rfi, onSave, onClose }) {
                   {rfi.cementQty && (
                     <div>ปริมาณที่จองปูน: <span className="font-semibold text-slate-800">{rfi.cementQty}{rfi.cementUnit ? ` ${rfi.cementUnit}` : ''}</span></div>
                   )}
+                </div>
+              </div>
+            )}
+            {additionalStage1Fields.length > 0 && (
+              <div className="col-span-3 mt-1">
+                <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider block mb-1">Additional Stage 1 Fields</span>
+                <div className="grid grid-cols-3 gap-x-6 gap-y-1 bg-white border border-slate-200 rounded-lg px-3 py-2">
+                  {additionalStage1Fields.map((field) => (
+                    <div key={field.key}>
+                      {field.label}: <span className="font-semibold text-slate-800">{field.value}</span>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
@@ -439,7 +572,7 @@ export default function RfiStage2Modal({ rfi, onSave, onClose }) {
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-5">
-        <FormField label="Work step">
+        {/*
           <div className="flex gap-2 items-center">
             <Select value={form.inspectionPackage || ''} onChange={set('inspectionPackage')}>
               <option value="">— Select Work step —</option>
@@ -463,6 +596,7 @@ export default function RfiStage2Modal({ rfi, onSave, onClose }) {
             placeholder="Describe the inspection scope as communicated to the client..." rows={3} />
         </FormField>
 
+        */}
         <FormField label="Note">
           <Textarea value={form.stage2Note} onChange={set('stage2Note')}
             placeholder="Any additional instructions or notes for the inspector..." rows={2} />
@@ -499,6 +633,13 @@ export default function RfiStage2Modal({ rfi, onSave, onClose }) {
         </FormField>
 
         <div className="flex justify-end gap-3 pt-2 border-t border-slate-100">
+          <button
+            type="button"
+            onClick={handleSaveDraft}
+            className="px-4 py-2 text-xs font-semibold text-amber-700 bg-amber-100 hover:bg-amber-200 rounded-lg transition-colors"
+          >
+            Save Draft
+          </button>
           <button type="button" onClick={onClose}
             className="px-4 py-2 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
             Cancel

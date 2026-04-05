@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ref as storageRef,
   uploadBytesResumable,
@@ -10,10 +10,19 @@ import { useApp }  from '../../context/AppContext';
 import { useAuth } from '../../auth/AuthContext';
 import { useMenuPermissions } from '../../auth/useMenuPermissions';
 import { storage } from '../../config/firebase';
+import { categories, subscribeCategory } from '../../services/firestore';
 import { Upload, X, Loader2, FileText, Image, FileSpreadsheet, Plus, Trash2 } from 'lucide-react';
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
+}
+
+function getUserDisplayName(user) {
+  const fullName = [user?.firstName, user?.lastName].filter(Boolean).join(' ').trim();
+  if (fullName) return fullName;
+  const email = (user?.email || '').trim();
+  if (!email) return '';
+  return email.includes('@') ? email.split('@')[0] : email;
 }
 
 
@@ -169,10 +178,30 @@ export default function RfiStage1Modal({ rfi, onSave, onClose }) {
   const { canAction } = useMenuPermissions();
   const canEditRfiNo = canAction('rfi', 'editRfiNo');
 
-  const displayName = [userProfile?.firstName, userProfile?.lastName].filter(Boolean).join(' ') || userProfile?.email || '';
+  const inspectorAutoName = getUserDisplayName(userProfile);
   const projectRfiItems = (rfiItems || []).filter(r => r.projectId === selectedProjectId);
   const autoRequestNo = generateRequestNo(selectedProject?.projectNo ?? '', projectRfiItems);
   const requestNo = rfi ? rfi.requestNo : autoRequestNo;
+  const [users, setUsers] = useState([]);
+
+  useEffect(() => {
+    const unsub = subscribeCategory(categories.users, setUsers);
+    return () => unsub?.();
+  }, []);
+
+  const qcDocRequestedByOptions = useMemo(() => {
+    const filtered = (users || []).filter((u) => {
+      const roles = Array.isArray(u?.role) ? u.role : (u?.role ? [u.role] : []);
+      if (!roles.includes('QcDocCenter')) return false;
+      const assignedProjects = Array.isArray(u?.assignedProjects) ? u.assignedProjects : [];
+      return !selectedProjectId || assignedProjects.includes(selectedProjectId);
+    });
+    return filtered
+      .map(getUserDisplayName)
+      .filter(Boolean)
+      .filter((name, idx, arr) => arr.indexOf(name) === idx)
+      .sort((a, b) => a.localeCompare(b));
+  }, [users, selectedProjectId]);
 
   const [form, setForm] = useState(() => {
     if (rfi) {
@@ -189,8 +218,8 @@ export default function RfiStage1Modal({ rfi, onSave, onClose }) {
       requestNo: autoRequestNo,
       rfiNo: canEditRfiNo ? '' : '-',
       dueDate: todayIso(),
-      requestedBy: displayName,
-      inspectedBy: displayName,
+      requestedBy: '',
+      inspectedBy: inspectorAutoName,
     };
   });
   const [referDrawingFiles, setReferDrawingFiles] = useState(
@@ -218,6 +247,21 @@ export default function RfiStage1Modal({ rfi, onSave, onClose }) {
   const [referDrawingUploading, setReferDrawingUploading] = useState(false);
   const [referDrawingProgress, setReferDrawingProgress] = useState(0);
   const [referDrawingError, setReferDrawingError] = useState('');
+
+  useEffect(() => {
+    if (rfi) return;
+    setForm((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      if (!next.inspectedBy) next.inspectedBy = inspectorAutoName;
+      if (!prev.inspectedBy && inspectorAutoName) changed = true;
+      if (!next.requestedBy && qcDocRequestedByOptions.length > 0) {
+        next.requestedBy = qcDocRequestedByOptions[0];
+        changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [rfi, inspectorAutoName, qcDocRequestedByOptions]);
 
   function addTagNoOption() {
     const val = window.prompt('เพิ่มรายการ Tag No.');
@@ -547,10 +591,16 @@ export default function RfiStage1Modal({ rfi, onSave, onClose }) {
           </div>
           <FormGrid cols={2}>
             <FormField label="QC Doc Requested By">
-              <Input value={form.requestedBy} onChange={set('requestedBy')} placeholder="Name" />
+              <Select value={form.requestedBy} onChange={set('requestedBy')}>
+                <option value="">— Select QC Document —</option>
+                {qcDocRequestedByOptions.map(name => <option key={name} value={name}>{name}</option>)}
+                {!!form.requestedBy && !qcDocRequestedByOptions.includes(form.requestedBy) && (
+                  <option value={form.requestedBy}>{form.requestedBy}</option>
+                )}
+              </Select>
             </FormField>
             <FormField label="QC Inspector Inspected By">
-              <Input value={form.inspectedBy} onChange={set('inspectedBy')} placeholder="Name" />
+              <Input value={form.inspectedBy} onChange={set('inspectedBy')} placeholder="Name" readOnly />
             </FormField>
           </FormGrid>
         </div>
@@ -571,6 +621,28 @@ export default function RfiStage1Modal({ rfi, onSave, onClose }) {
               <Select value={form.statusDoc} onChange={set('statusDoc')}>
                 {['Open', 'Pending', 'Complete', 'Waiting Approve', 'Close'].map(s => <option key={s}>{s}</option>)}
               </Select>
+            </FormField>
+          </FormGrid>
+        </div>
+
+        {/* ── Section: Concrete / Material ── */}
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-5 h-5 rounded-full bg-slate-400 text-white flex items-center justify-center text-[10px] font-bold shrink-0">6</div>
+            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Concrete / Material Test (if applicable)</h3>
+          </div>
+          <FormGrid cols={4}>
+            <FormField label="วันที่จองคอนกรีต">
+              <Input type="date" value={form.concretePourDate} onChange={set('concretePourDate')} />
+            </FormField>
+            <FormField label="BRAND (ปูนซีเมนต์)">
+              <Input value={form.brand} onChange={set('brand')} placeholder="TPI / SCG..." />
+            </FormField>
+            <FormField label="ปริมาณที่จองปูน">
+              <Input type="number" min="0" step="any" value={form.cementQty} onChange={set('cementQty')} placeholder="0" />
+            </FormField>
+            <FormField label="หน่วย">
+              <Input value={form.cementUnit} onChange={set('cementUnit')} placeholder="ลบ.ม. / ถุง..." />
             </FormField>
           </FormGrid>
         </div>

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { pdfjs } from 'react-pdf';
 import {
   Upload, FileText, Edit2, Save, X, Loader2,
-  Trash2, ArrowUp, ArrowDown, ImagePlus, RefreshCw, ZoomIn, ZoomOut,
+  Trash2, ArrowUp, ArrowDown, RefreshCw, ZoomIn, ZoomOut,
 } from 'lucide-react';
 import { storage } from '../../config/firebase';
 import { ref as storageRef, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
@@ -98,7 +98,7 @@ export default function MarkupDwgPage() {
   const canSave = canAction('markup-dwg', 'saveMarkup');
 
   const pdfInputRef = useRef(null);
-  const addImageInputRef = useRef(null);
+  const addPdfInputRef = useRef(null);
   const replaceImageInputRef = useRef(null);
 
   const [isEditMode, setIsEditMode] = useState(false);
@@ -233,43 +233,23 @@ export default function MarkupDwgPage() {
     }
   }
 
-  async function uploadImageFiles(files, startOrder = 0) {
-    if (!selectedProject || !files.length) return [];
-
-    const uploadedPages = [];
-
-    for (let i = 0; i < files.length; i += 1) {
-      const file = files[i];
-      setBusyLabel(`Uploading image ${i + 1}/${files.length}`);
-      setBusyProgress(Math.round(((i + 1) / files.length) * 100));
-
-      const ext = getFileExtension(file.name, 'png');
-      const path = `markup-dwg/${selectedProject.id}/manual/${Date.now()}-${i + 1}.${ext}`;
-      const url = await uploadBlob(file, path);
-      uploadedPages.push({
-        id: createId(),
-        name: file.name,
-        url,
-        order: startOrder + i,
-      });
-    }
-
-    return uploadedPages;
-  }
-
-  async function handleAddImages(files) {
-    if (!files?.length) return;
+  async function handleAddPdf(file) {
+    if (!file) return;
 
     try {
-      const newPages = await uploadImageFiles(Array.from(files), draftPages.length);
+      const convertedPages = await convertPdfToPages(file);
+      const newPages = convertedPages.map((page, index) => ({
+        ...page,
+        order: draftPages.length + index,
+      }));
       setDraftPages(prev => [...prev, ...newPages]);
     } catch (error) {
-      console.error('Failed to add images:', error);
-      alert('Failed to add images.');
+      console.error('Failed to add PDF pages:', error);
+      alert('Failed to add PDF.');
     } finally {
       setBusyLabel('');
       setBusyProgress(0);
-      if (addImageInputRef.current) addImageInputRef.current.value = '';
+      if (addPdfInputRef.current) addPdfInputRef.current.value = '';
     }
   }
 
@@ -427,12 +407,12 @@ export default function MarkupDwgPage() {
               <>
                 <button
                   type="button"
-                  onClick={() => addImageInputRef.current?.click()}
+                  onClick={() => addPdfInputRef.current?.click()}
                   disabled={!!busyLabel}
                   className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
                 >
-                  <ImagePlus size={16} />
-                  Add Images
+                  <FileText size={16} />
+                  Add PDF
                 </button>
                 <button
                   type="button"
@@ -484,11 +464,13 @@ export default function MarkupDwgPage() {
           className="hidden"
         />
         <input
-          ref={addImageInputRef}
+          ref={addPdfInputRef}
           type="file"
-          accept=".jpg,.jpeg,.png,.webp"
-          multiple
-          onChange={(e) => handleAddImages(e.target.files)}
+          accept=".pdf"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) handleAddPdf(file);
+          }}
           className="hidden"
         />
         <input
