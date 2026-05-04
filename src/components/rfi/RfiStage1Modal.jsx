@@ -33,7 +33,7 @@ const REFER_DRAWING_MIME = [
   'image/jpeg', 'image/png', 'image/gif', 'image/webp',
 ];
 const REFER_DRAWING_EXT = '.pdf,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.webp';
-const REFER_DRAWING_MAX_MB = 20;
+const REFER_DRAWING_MAX_MB = null; // ไม่จำกัดขนาดไฟล์
 
 function referDrawingFileIcon(name = '') {
   const ext = name.split('.').pop()?.toLowerCase();
@@ -331,10 +331,7 @@ export default function RfiStage1Modal({ rfi, onSave, onClose }) {
         setReferDrawingError(`"${file.name}" ไม่รองรับ — อัปโหลดได้เฉพาะ PDF, Excel, รูปภาพ`);
         continue;
       }
-      if (file.size > REFER_DRAWING_MAX_MB * 1024 * 1024) {
-        setReferDrawingError(`"${file.name}" มีขนาดเกิน ${REFER_DRAWING_MAX_MB} MB`);
-        continue;
-      }
+      // ไม่จำกัดขนาดไฟล์
       const seq = referDrawingFiles.length + results.length + 1;
       const ext = file.name.split('.').pop();
       const path = `rfi-refer-drawings/${selectedProjectId}/${safeReq}/${String(seq).padStart(2, '0')}.${ext}`;

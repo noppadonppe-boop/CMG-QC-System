@@ -29,7 +29,7 @@ const S4_MIME = [
   'image/webp',
 ];
 const S4_EXT = '.pdf,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.webp';
-const S4_MAX_MB = 20;
+const S4_MAX_MB = null; // ไม่จำกัดขนาดไฟล์
 
 function fileIcon(name = '') {
   const ext = name.split('.').pop()?.toLowerCase();
@@ -89,10 +89,7 @@ function Stage4Uploader({
           setErrorMsg(`"${file.name}" ไม่รองรับ — อัปโหลดได้เฉพาะ PDF, Excel, รูปภาพ`);
           continue;
         }
-        if (file.size > S4_MAX_MB * 1024 * 1024) {
-          setErrorMsg(`"${file.name}" มีขนาดเกิน ${S4_MAX_MB} MB`);
-          continue;
-        }
+        // ไม่จำกัดขนาดไฟล์
         const seq = files.length + results.length + 1;
         const ext = file.name.split('.').pop();
         const path = `rfi-stage4/${projectId}/${safeReq}/${folder}_${String(seq).padStart(2, '0')}.${ext}`;

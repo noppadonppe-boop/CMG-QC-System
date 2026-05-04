@@ -32,7 +32,7 @@ const DOCUMENT_MIME = [
   'image/jpeg', 'image/png', 'image/gif', 'image/webp',
 ];
 const DOCUMENT_EXT = '.pdf,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.webp';
-const DOCUMENT_MAX_MB = 20;
+const DOCUMENT_MAX_MB = null; // ไม่จำกัดขนาดไฟล์
 
 function documentFileIcon(name = '') {
   const ext = name.split('.').pop()?.toLowerCase();
@@ -126,10 +126,7 @@ export default function MaterialApproveModal({ material, onSave, onClose }) {
         setDocumentError(`"${file.name}" ไม่รองรับ — อัปโหลดได้เฉพาะ PDF, Excel, รูปภาพ`);
         continue;
       }
-      if (file.size > DOCUMENT_MAX_MB * 1024 * 1024) {
-        setDocumentError(`"${file.name}" มีขนาดเกิน ${DOCUMENT_MAX_MB} MB`);
-        continue;
-      }
+      // ไม่จำกัดขนาดไฟล์
       const seq = documents.length + results.length + 1;
       const ext = file.name.split('.').pop();
       const path = `material-approvals/${selectedProjectId}/${safeMatRevNo}/approval-${approvalNumber}/${String(seq).padStart(2, '0')}.${ext}`;

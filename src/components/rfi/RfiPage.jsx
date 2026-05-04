@@ -101,7 +101,7 @@ const RFI_TABLE_COLUMNS = [
   { key: 'requestedBy', label: 'Stage 1 Requested By', defaultHidden: true },
   { key: 'inspectedBy', label: 'Stage 1 Inspected By', defaultHidden: true },
   { key: 'detailInspection', label: 'Stage 1 Detail', defaultHidden: true },
-  { key: 'dueDate', label: 'Due Date' },
+  { key: 'dueDate', label: 'Issue Date' },
   { key: 'stage', label: 'Stage' },
   { key: 'inspectionPackage', label: 'Stage 2 Work Step', defaultHidden: true },
   { key: 'inspectionScheduleDate', label: 'Stage 2 Schedule Date', defaultHidden: true },
@@ -138,7 +138,7 @@ const TEST_RESULT_MIME = [
   'image/webp',
 ];
 const TEST_RESULT_EXT = '.pdf,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.webp';
-const TEST_RESULT_MAX_MB = 20;
+const TEST_RESULT_MAX_MB = null; // ไม่จำกัดขนาดไฟล์
 
 function startOfDay(date) {
   const value = new Date(date);
@@ -722,10 +722,7 @@ export default function RfiPage() {
           window.alert(`ไฟล์ "${file.name}" ไม่รองรับ`);
           continue;
         }
-        if (file.size > TEST_RESULT_MAX_MB * 1024 * 1024) {
-          window.alert(`ไฟล์ "${file.name}" มีขนาดเกิน ${TEST_RESULT_MAX_MB} MB`);
-          continue;
-        }
+        // ไม่จำกัดขนาดไฟล์
         const ext = file.name.split('.').pop();
         const seq = existingFiles.length + results.length + 1;
         const path = `rfi-concrete-tests/${rfi.projectId}/${safeReq}/${type}_${String(seq).padStart(2, '0')}.${ext}`;

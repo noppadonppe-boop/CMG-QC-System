@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { pdfjs } from 'react-pdf';
 import {
   Upload, FileText, Edit2, Save, X, Loader2,
-  Trash2, ArrowUp, ArrowDown, RefreshCw, ZoomIn, ZoomOut,
+  Trash2, ArrowUp, ArrowDown, RefreshCw, ZoomIn, ZoomOut, Plus, Building2,
 } from 'lucide-react';
 import { storage } from '../../config/firebase';
 import { ref as storageRef, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
@@ -107,17 +107,31 @@ export default function MarkupDwgPage() {
   const [draftPages, setDraftPages] = useState([]);
   const [replaceTargetId, setReplaceTargetId] = useState('');
   const [zoom, setZoom] = useState(100);
+  const [activeBuilding, setActiveBuilding] = useState('');
+  const [showBuildingModal, setShowBuildingModal] = useState(false);
+  const [newBuildingName, setNewBuildingName] = useState('');
 
   const currentMarkup = useMemo(() => {
     if (!selectedProject) return null;
     return markupDwgItems.find(item => item.id === selectedProject.id || item.projectId === selectedProject.id) || null;
   }, [markupDwgItems, selectedProject]);
 
+  const buildings = useMemo(() => {
+    return currentMarkup?.buildings || [];
+  }, [currentMarkup]);
+
   useEffect(() => {
     if (!isEditMode) {
-      setDraftPages(currentMarkup?.pages || []);
+      const currentBuilding = buildings.find(b => b.id === activeBuilding);
+      setDraftPages(currentBuilding?.pages || []);
     }
-  }, [currentMarkup, isEditMode]);
+  }, [currentMarkup, isEditMode, activeBuilding, buildings]);
+
+  useEffect(() => {
+    if (buildings.length > 0 && !activeBuilding) {
+      setActiveBuilding(buildings[0].id);
+    }
+  }, [buildings, activeBuilding]);
 
   async function uploadBlob(blob, path, onProgress) {
     const ref = storageRef(storage, path);
@@ -158,8 +172,56 @@ export default function MarkupDwgPage() {
     }
   }
 
+  async function createBuilding() {
+    if (!newBuildingName.trim() || !selectedProject) return;
+    
+    const newBuilding = {
+      id: createId('building'),
+      name: newBuildingName.trim(),
+      pages: [],
+      createdAt: new Date().toISOString(),
+    };
+
+    const updatedBuildings = [...buildings, newBuilding];
+    
+    await saveMarkupRecord({
+      buildings: updatedBuildings,
+    });
+
+    setActiveBuilding(newBuilding.id);
+    setNewBuildingName('');
+    setShowBuildingModal(false);
+  }
+
+  async function deleteBuilding(buildingId) {
+    if (!window.confirm('ต้องการลบอาคารนี้และไฟล์ทั้งหมดหรือไม่?')) return;
+    
+    const updatedBuildings = buildings.filter(b => b.id !== buildingId);
+    
+    await saveMarkupRecord({
+      buildings: updatedBuildings,
+    });
+
+    if (activeBuilding === buildingId && updatedBuildings.length > 0) {
+      setActiveBuilding(updatedBuildings[0].id);
+    }
+  }
+
+  async function renameBuildingPrompt(building) {
+    const newName = window.prompt('ชื่ออาคารใหม่:', building.name);
+    if (!newName || newName.trim() === building.name) return;
+
+    const updatedBuildings = buildings.map(b => 
+      b.id === building.id ? { ...b, name: newName.trim() } : b
+    );
+
+    await saveMarkupRecord({
+      buildings: updatedBuildings,
+    });
+  }
+
   async function convertPdfToPages(pdfFile) {
-    if (!selectedProject) return [];
+    if (!selectedProject || !activeBuilding) return [];
 
     const data = new Uint8Array(await pdfFile.arrayBuffer());
     const pdf = await pdfjs.getDocument({ data }).promise;
@@ -190,7 +252,7 @@ export default function MarkupDwgPage() {
       });
 
       const safeName = pdfFile.name.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9-_]/g, '-');
-      const imagePath = `markup-dwg/${selectedProject.id}/pages/${safeName}-${String(i).padStart(2, '0')}-${Date.now()}.png`;
+      const imagePath = `markup-dwg/${selectedProject.id}/buildings/${activeBuilding}/pages/${safeName}-${String(i).padStart(2, '0')}-${Date.now()}.png`;
       const imageUrl = await uploadBlob(blob, imagePath);
 
       pages.push({
@@ -205,20 +267,25 @@ export default function MarkupDwgPage() {
   }
 
   async function handlePdfUpload(file) {
-    if (!file || !selectedProject) return;
+    if (!file || !selectedProject || !activeBuilding) return;
 
     try {
       setBusyLabel('Uploading original PDF');
       setBusyProgress(0);
 
-      const pdfPath = `markup-dwg/${selectedProject.id}/source/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9-_.]/g, '-')}`;
+      const pdfPath = `markup-dwg/${selectedProject.id}/buildings/${activeBuilding}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9-_.]/g, '-')}`;
       const pdfUrl = await uploadBlob(file, pdfPath, setBusyProgress);
 
       const pages = await convertPdfToPages(file);
+      
+      const updatedBuildings = buildings.map(b => 
+        b.id === activeBuilding 
+          ? { ...b, sourceFileName: file.name, sourcePdfUrl: pdfUrl, pages }
+          : b
+      );
+
       await saveMarkupRecord({
-        sourceFileName: file.name,
-        sourcePdfUrl: pdfUrl,
-        pages,
+        buildings: updatedBuildings,
       });
 
       setDraftPages(pages);
@@ -254,14 +321,14 @@ export default function MarkupDwgPage() {
   }
 
   async function handleReplaceImage(file) {
-    if (!file || !replaceTargetId || !selectedProject) return;
+    if (!file || !replaceTargetId || !selectedProject || !activeBuilding) return;
 
     try {
       setBusyLabel('Replacing page image');
       setBusyProgress(0);
 
       const ext = getFileExtension(file.name, 'png');
-      const path = `markup-dwg/${selectedProject.id}/manual/${Date.now()}-replace.${ext}`;
+      const path = `markup-dwg/${selectedProject.id}/buildings/${activeBuilding}/manual/${Date.now()}-replace.${ext}`;
       const url = await uploadBlob(file, path, setBusyProgress);
 
       setDraftPages(prev => prev.map(page => (
@@ -281,12 +348,14 @@ export default function MarkupDwgPage() {
   }
 
   function beginEdit() {
-    setDraftPages(currentMarkup?.pages || []);
+    const currentBuilding = buildings.find(b => b.id === activeBuilding);
+    setDraftPages(currentBuilding?.pages || []);
     setIsEditMode(true);
   }
 
   function cancelEdit() {
-    setDraftPages(currentMarkup?.pages || []);
+    const currentBuilding = buildings.find(b => b.id === activeBuilding);
+    setDraftPages(currentBuilding?.pages || []);
     setIsEditMode(false);
   }
 
@@ -305,19 +374,29 @@ export default function MarkupDwgPage() {
   }
 
   async function saveDraftPages() {
-    if (!selectedProject || !canSave) return;
+    if (!selectedProject || !canSave || !activeBuilding) return;
 
     try {
       setBusyLabel('Saving markup pages');
       setBusyProgress(100);
 
+      const currentBuilding = buildings.find(b => b.id === activeBuilding);
+      const updatedBuildings = buildings.map(b => 
+        b.id === activeBuilding 
+          ? {
+              ...b,
+              sourceFileName: currentBuilding?.sourceFileName || 'Markup Pages',
+              sourcePdfUrl: currentBuilding?.sourcePdfUrl || '',
+              pages: draftPages.map((page, index) => ({
+                ...page,
+                order: index,
+              })),
+            }
+          : b
+      );
+
       await saveMarkupRecord({
-        sourceFileName: currentMarkup?.sourceFileName || 'Markup Pages',
-        sourcePdfUrl: currentMarkup?.sourcePdfUrl || '',
-        pages: draftPages.map((page, index) => ({
-          ...page,
-          order: index,
-        })),
+        buildings: updatedBuildings,
       });
 
       setIsEditMode(false);
@@ -330,7 +409,8 @@ export default function MarkupDwgPage() {
     }
   }
 
-  const visiblePages = isEditMode ? draftPages : (currentMarkup?.pages || []);
+  const currentBuilding = buildings.find(b => b.id === activeBuilding);
+  const visiblePages = isEditMode ? draftPages : (currentBuilding?.pages || []);
 
   function zoomOut() {
     setZoom(prev => Math.max(0, prev - 10));
@@ -346,20 +426,29 @@ export default function MarkupDwgPage() {
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="flex items-center gap-3">
-              <h1 className="text-lg font-bold text-slate-800">Markup DWG</h1>
-              {currentMarkup?.sourceFileName && (
+              <h1 className="text-lg font-bold text-slate-800">Markup RFI</h1>
+              {currentBuilding?.sourceFileName && (
                 <div className="flex items-center gap-2 text-sm text-slate-600">
                   <FileText size={16} />
-                  <span className="truncate">{currentMarkup.sourceFileName}</span>
+                  <span className="truncate">{currentBuilding.sourceFileName}</span>
                 </div>
               )}
             </div>
             <p className="mt-1 text-sm text-slate-500">
-              Upload PDF, convert each page to image, and keep this layout as the default view for everyone in the project.
+              จัดการไฟล์ Markup RFI แยกตามอาคาร อัพโหลด PDF และแปลงเป็นรูปภาพแต่ละหน้า
             </p>
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowBuildingModal(true)}
+              className="inline-flex items-center gap-2 rounded-lg bg-purple-500 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-purple-600"
+            >
+              <Plus size={16} />
+              สร้างอาคาร
+            </button>
+
             {!!visiblePages.length && (
               <div className="mr-2 inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
                 <button
@@ -385,14 +474,14 @@ export default function MarkupDwgPage() {
             <button
               type="button"
               onClick={() => pdfInputRef.current?.click()}
-              disabled={!!busyLabel}
+              disabled={!!busyLabel || !activeBuilding}
               className="inline-flex items-center gap-2 rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-orange-600 disabled:opacity-50"
             >
               {busyLabel ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
-              {currentMarkup ? 'Replace PDF' : 'Upload PDF'}
+              {currentBuilding?.pages?.length ? 'Replace PDF' : 'Upload PDF'}
             </button>
 
-            {!!currentMarkup && !isEditMode && canEdit && (
+            {!!currentBuilding && !isEditMode && canEdit && (
               <button
                 type="button"
                 onClick={beginEdit}
@@ -485,15 +574,139 @@ export default function MarkupDwgPage() {
         />
       </div>
 
+      {/* Building Modal */}
+      {showBuildingModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowBuildingModal(false)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-purple-100 flex items-center justify-center shrink-0">
+                <Building2 size={18} className="text-purple-600" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-800">สร้างอาคารใหม่</h3>
+                <p className="text-xs text-slate-500 mt-0.5">กรอกชื่ออาคารเพื่อเริ่มต้น</p>
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-600 block mb-2">ชื่ออาคาร</label>
+              <input
+                type="text"
+                value={newBuildingName}
+                onChange={(e) => setNewBuildingName(e.target.value)}
+                placeholder="เช่น อาคาร A, Building 1, โรงงาน 1"
+                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-400"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && newBuildingName.trim()) {
+                    createBuilding();
+                  }
+                }}
+                autoFocus
+              />
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setShowBuildingModal(false);
+                  setNewBuildingName('');
+                }}
+                className="flex-1 px-4 py-2 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+              >
+                ยกเลิก
+              </button>
+              <button
+                onClick={createBuilding}
+                disabled={!newBuildingName.trim()}
+                className="flex-1 px-4 py-2 text-xs font-semibold text-white bg-purple-500 hover:bg-purple-600 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                สร้างอาคาร
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Building Tabs */}
+      {buildings.length > 0 && (
+        <div className="border-b border-slate-200 bg-white px-5">
+          <div className="flex items-center gap-2 overflow-x-auto">
+            {buildings.map(building => (
+              <div key={building.id} className="group relative">
+                <button
+                  type="button"
+                  onClick={() => setActiveBuilding(building.id)}
+                  className={`flex items-center gap-2 whitespace-nowrap border-b-2 px-4 py-3 text-sm font-medium transition-colors ${
+                    activeBuilding === building.id
+                      ? 'border-orange-500 text-orange-600'
+                      : 'border-transparent text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <Building2 size={16} />
+                  {building.name}
+                  {building.pages?.length > 0 && (
+                    <span className="ml-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
+                      {building.pages.length}
+                    </span>
+                  )}
+                </button>
+                {canEdit && (
+                  <div className="absolute right-1 top-1 hidden gap-1 group-hover:flex">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        renameBuildingPrompt(building);
+                      }}
+                      className="rounded bg-blue-500 p-1 text-white hover:bg-blue-600"
+                      title="เปลี่ยนชื่อ"
+                    >
+                      <Edit2 size={10} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deleteBuilding(building.id);
+                      }}
+                      className="rounded bg-red-500 p-1 text-white hover:bg-red-600"
+                      title="ลบอาคาร"
+                    >
+                      <Trash2 size={10} />
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="flex-1 overflow-y-auto p-5">
-        {!visiblePages.length ? (
+        {buildings.length === 0 ? (
+          <div className="flex h-full items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white">
+            <div className="max-w-md text-center">
+              <Building2 size={48} className="mx-auto mb-4 text-slate-400" />
+              <h2 className="text-lg font-semibold text-slate-700">ยังไม่มีอาคาร</h2>
+              <p className="mt-2 text-sm text-slate-500">
+                เริ่มต้นด้วยการสร้างอาคารใหม่ จากนั้นอัพโหลด PDF เพื่อแปลงเป็นรูปภาพแต่ละหน้า
+              </p>
+              <button
+                type="button"
+                onClick={() => setShowBuildingModal(true)}
+                className="mt-5 inline-flex items-center gap-2 rounded-lg bg-purple-500 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-purple-600"
+              >
+                <Plus size={16} />
+                สร้างอาคารแรก
+              </button>
+            </div>
+          </div>
+        ) : !visiblePages.length ? (
           <div className="flex h-full items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white">
             <div className="max-w-md text-center">
               <Upload size={48} className="mx-auto mb-4 text-slate-400" />
-              <h2 className="text-lg font-semibold text-slate-700">No markup pages yet</h2>
+              <h2 className="text-lg font-semibold text-slate-700">ยังไม่มีไฟล์ในอาคารนี้</h2>
               <p className="mt-2 text-sm text-slate-500">
-                Upload a PDF and this page will convert it into image pages, save it as the default project view,
-                and show the pages here every time someone opens Markup DWG.
+                อัพโหลด PDF และระบบจะแปลงเป็นรูปภาพแต่ละหน้าสำหรับอาคาร {currentBuilding?.name}
               </p>
               <button
                 type="button"

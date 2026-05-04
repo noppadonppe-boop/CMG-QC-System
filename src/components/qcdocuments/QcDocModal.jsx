@@ -21,7 +21,7 @@ const ALLOWED_MIME = [
   'image/jpeg', 'image/png', 'image/gif', 'image/webp',
 ];
 const ALLOWED_EXT = '.pdf,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.webp';
-const MAX_SIZE_MB  = 20;
+const MAX_SIZE_MB  = null; // ไม่จำกัดขนาดไฟล์
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
@@ -76,10 +76,7 @@ function FileUploader({ label, required, transmittalNo, namePrefix, files, setFi
         setErrorMsg(`"${file.name}" ไม่รองรับ — อัปโหลดได้เฉพาะ PDF, Excel, รูปภาพ`);
         continue;
       }
-      if (maxSizeMB && file.size > maxSizeMB * 1024 * 1024) {
-        setErrorMsg(`"${file.name}" มีขนาดเกิน ${maxSizeMB} MB`);
-        continue;
-      }
+      // ไม่จำกัดขนาดไฟล์
 
       const seqNo    = files.length + results.length + 1;
       const seqStr   = String(seqNo).padStart(2, '0');

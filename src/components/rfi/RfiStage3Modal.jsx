@@ -19,10 +19,10 @@ const S3_MIME = [
   'image/jpeg', 'image/png', 'image/gif', 'image/webp',
 ];
 const S3_EXT = '.pdf,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.webp';
-const S3_MAX_MB = 20;
+const S3_MAX_MB = null; // ไม่จำกัดขนาดไฟล์
 const CEMENT_BILL_MIME = ['application/pdf', 'image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 const CEMENT_BILL_EXT = '.pdf,.jpg,.jpeg,.png,.gif,.webp';
-const CEMENT_BILL_MAX_MB = 10;
+const CEMENT_BILL_MAX_MB = null; // ไม่จำกัดขนาดไฟล์
 
 function s3FileIcon(name = '') {
   const ext = name.split('.').pop()?.toLowerCase();
@@ -78,10 +78,7 @@ function Stage3Uploader({ label, files, setFiles, projectId, requestNo, folder, 
         setErrorMsg(`"${file.name}" ไม่รองรับ — อัปโหลดได้เฉพาะ PDF, Excel, รูปภาพ`);
         continue;
       }
-      if (file.size > S3_MAX_MB * 1024 * 1024) {
-        setErrorMsg(`"${file.name}" มีขนาดเกิน ${S3_MAX_MB} MB`);
-        continue;
-      }
+      // ไม่จำกัดขนาดไฟล์
       const seq = files.length + results.length + 1;
       const ext = file.name.split('.').pop();
       const path = `rfi-stage3/${projectId}/${safeReq}/${folder}_${String(seq).padStart(2, '0')}.${ext}`;
@@ -194,10 +191,7 @@ export default function RfiStage3Modal({ rfi, onSave, onClose }) {
           setCementBillError(`"${file.name}" ไม่รองรับ — ใช้ได้เฉพาะรูปภาพหรือ PDF`);
           continue;
         }
-        if (file.size > CEMENT_BILL_MAX_MB * 1024 * 1024) {
-          setCementBillError(`"${file.name}" มีขนาดเกิน ${CEMENT_BILL_MAX_MB} MB`);
-          continue;
-        }
+        // ไม่จำกัดขนาดไฟล์
         const seq = cementBillFiles.length + results.length + 1;
         const ext = file.name.split('.').pop();
         const path = `rfi-cement-bills/${rfi.projectId}/${safeReq}/bill_${String(seq).padStart(2, '0')}.${ext}`;

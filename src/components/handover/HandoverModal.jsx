@@ -21,7 +21,7 @@ const DOCUMENT_MIME = [
   'image/webp',
 ];
 const DOCUMENT_EXT = '.pdf,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.webp';
-const DOCUMENT_MAX_MB = 20;
+const DOCUMENT_MAX_MB = null; // ไม่จำกัดขนาดไฟล์
 
 function getNowTimestamp() {
   const now = new Date();
@@ -115,11 +115,7 @@ export default function HandoverModal({ item, onSave, onClose }) {
       else setCloseError('Unsupported file type.');
       return;
     }
-    if (file.size > DOCUMENT_MAX_MB * 1024 * 1024) {
-      if (kind === 'open') setOpenError(`File size exceeds ${DOCUMENT_MAX_MB} MB.`);
-      else setCloseError(`File size exceeds ${DOCUMENT_MAX_MB} MB.`);
-      return;
-    }
+    // ไม่จำกัดขนาดไฟล์
 
     const safeNoticeNo = (form.noticeNo || 'handover').replace(/[/\\#?]/g, '-');
     const ext = file.name.split('.').pop()?.toLowerCase() || 'pdf';

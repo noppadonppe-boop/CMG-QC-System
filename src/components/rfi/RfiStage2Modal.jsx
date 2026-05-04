@@ -15,7 +15,7 @@ const STAGE2_MIME = [
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 ];
 const STAGE2_EXT = '.pdf,.xls,.xlsx';
-const STAGE2_MAX_MB = 20;
+const STAGE2_MAX_MB = null; // ไม่จำกัดขนาดไฟล์
 
 function fileIcon(name = '') {
   const ext = name.split('.').pop()?.toLowerCase();
@@ -217,10 +217,7 @@ export default function RfiStage2Modal({ rfi, onSave, onSaveDraft, onClose }) {
         setErrorMsg(`"${file.name}" ไม่รองรับ — อัปโหลดได้เฉพาะ PDF, Excel`);
         continue;
       }
-      if (file.size > STAGE2_MAX_MB * 1024 * 1024) {
-        setErrorMsg(`"${file.name}" มีขนาดเกิน ${STAGE2_MAX_MB} MB`);
-        continue;
-      }
+      // ไม่จำกัดขนาดไฟล์
       const seq = stage2Files.length + results.length + 1;
       const ext = file.name.split('.').pop();
       const path = `rfi-stage2/${projectId}/${safeReq}/stage2_${String(seq).padStart(2, '0')}.${ext}`;
