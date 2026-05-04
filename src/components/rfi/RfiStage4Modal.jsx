@@ -3,6 +3,7 @@ import {
   ref as storageRef,
   uploadBytesResumable,
   getDownloadURL,
+  deleteObject,
 } from 'firebase/storage';
 import Modal from '../common/Modal';
 import { FormField, Input, Select, Textarea, FormGrid } from '../common/FormField';
@@ -48,6 +49,7 @@ function Stage4Uploader({
   disabled,
   locked = false,
   onUploaded,
+  onRemoved,
   onUploadingChange,
   accentColor = 'green',
 }) {
@@ -121,9 +123,32 @@ function Stage4Uploader({
     }
   }
 
-  function removeFile(idx) {
+  async function removeFile(idx) {
     if (isDisabled) return;
-    setFiles(prev => prev.filter((_, i) => i !== idx));
+    const fileToRemove = files[idx];
+
+    setUploading(true);
+    onUploadingChange?.(true);
+
+    try {
+      if (fileToRemove.url) {
+        const fileRef = storageRef(storage, fileToRemove.url);
+        await deleteObject(fileRef).catch(e => {
+          console.warn("Could not delete from storage:", e);
+        });
+      }
+
+      setFiles(prev => {
+        const newFiles = prev.filter((_, i) => i !== idx);
+        onRemoved?.(newFiles, fileToRemove);
+        return newFiles;
+      });
+    } catch (error) {
+      setErrorMsg("Failed to delete file.");
+    } finally {
+      setUploading(false);
+      onUploadingChange?.(false);
+    }
   }
 
   return (
@@ -225,16 +250,10 @@ export default function RfiStage4Modal({ rfi, onSave, onClose }) {
     });
   };
 
-  const step = useMemo(() => {
-    if (workflowStatus === S4_WORKFLOW.RFI_CLOSED) return 4; // done
-    if (workflowStatus === S4_WORKFLOW.CONTRACTOR_SIGNED) return 3;
-    if (workflowStatus === S4_WORKFLOW.QC_SIGNED) return 2;
-    return 1;
-  }, [workflowStatus]);
-
-  const canUploadStep1 = canUploadClientSign && step === 1;
-  const canUploadStep2 = canUploadComplete && step === 2;
-  const canUploadStep3 = canUploadComplete && step === 3;
+  // derive step from files length instead of workflowStatus for locking logic
+  const canUploadStep1 = canUploadClientSign;
+  const canUploadStep2 = canUploadComplete;
+  const canUploadStep3 = canUploadComplete;
 
   const canStartWorkflow = true; // Always allow workflow to start in Stage 4
 
@@ -500,7 +519,7 @@ export default function RfiStage4Modal({ rfi, onSave, onClose }) {
               projectId={rfi.projectId} requestNo={rfi.requestNo}
               folder="qc-sign"
               disabled={!canUploadStep1}
-              locked={step > 1}
+              locked={completeFiles.length > 0}
               onUploadingChange={(isUploading) => handleUploadingChange('qc-sign', isUploading)}
               onUploaded={(merged) => {
                 const next = S4_WORKFLOW.QC_SIGNED;
@@ -513,20 +532,28 @@ export default function RfiStage4Modal({ rfi, onSave, onClose }) {
                   stage4ClientSignFiles: merged,
                 }, next);
               }}
+              onRemoved={(remaining) => {
+                const next = remaining.length === 0 ? 'Waiting approve' : S4_WORKFLOW.QC_SIGNED;
+                persist({
+                  stage4Status: next,
+                  statusDoc: next,
+                  stage4ClientSignFiles: remaining,
+                }, next);
+              }}
               accentColor="teal"
             />
           </FormField>
           <FormField label="Step 2 — Contractor Signed (Upload)">
             <Stage4Uploader
               label={
-                step < 2 ? 'รอ Step 1: QC Signed' :
+                clientSignFiles.length === 0 ? 'รอ Step 1: QC Signed' :
                 canUploadComplete ? 'เลือกไฟล์ Contractor Sign' : 'ไม่มีสิทธิ์อัปโหลด (ดูไฟล์เท่านั้น)'
               }
               files={completeFiles} setFiles={setCompleteFiles}
               projectId={rfi.projectId} requestNo={rfi.requestNo}
               folder="contractor-sign"
-              disabled={step !== 2 || !canUploadStep2}
-              locked={step > 2}
+              disabled={(clientSignFiles.length === 0 && completeFiles.length === 0) || !canUploadStep2}
+              locked={ownerSignFiles.length > 0}
               onUploadingChange={(isUploading) => handleUploadingChange('contractor-sign', isUploading)}
               onUploaded={(merged) => {
                 const next = S4_WORKFLOW.CONTRACTOR_SIGNED;
@@ -536,20 +563,28 @@ export default function RfiStage4Modal({ rfi, onSave, onClose }) {
                   stage4CompleteFiles: merged,
                 }, next);
               }}
+              onRemoved={(remaining) => {
+                const next = remaining.length === 0 ? S4_WORKFLOW.QC_SIGNED : S4_WORKFLOW.CONTRACTOR_SIGNED;
+                persist({
+                  stage4Status: next,
+                  statusDoc: next,
+                  stage4CompleteFiles: remaining,
+                }, next);
+              }}
               accentColor="green"
             />
           </FormField>
           <FormField label="Step 3 — Owner Sign (Upload)">
             <Stage4Uploader
               label={
-                step < 3 ? 'รอ Step 2: Contractor Signed' :
+                completeFiles.length === 0 ? 'รอ Step 2: Contractor Signed' :
                 canUploadComplete ? 'เลือกไฟล์ Owner Sign' : 'ไม่มีสิทธิ์อัปโหลด (ดูไฟล์เท่านั้น)'
               }
               files={ownerSignFiles} setFiles={setOwnerSignFiles}
               projectId={rfi.projectId} requestNo={rfi.requestNo}
               folder="owner-sign"
-              disabled={step !== 3 || !canUploadStep3}
-              locked={step > 3}
+              disabled={(completeFiles.length === 0 && ownerSignFiles.length === 0) || !canUploadStep3}
+              locked={false}
               onUploadingChange={(isUploading) => handleUploadingChange('owner-sign', isUploading)}
               onUploaded={(merged) => {
                 const next = S4_WORKFLOW.RFI_CLOSED;
@@ -557,6 +592,14 @@ export default function RfiStage4Modal({ rfi, onSave, onClose }) {
                   stage4Status: next,
                   statusDoc: next,
                   stage4OwnerSignFiles: merged,
+                }, next);
+              }}
+              onRemoved={(remaining) => {
+                const next = remaining.length === 0 ? S4_WORKFLOW.CONTRACTOR_SIGNED : S4_WORKFLOW.RFI_CLOSED;
+                persist({
+                  stage4Status: next,
+                  statusDoc: next,
+                  stage4OwnerSignFiles: remaining,
                 }, next);
               }}
               accentColor="green"

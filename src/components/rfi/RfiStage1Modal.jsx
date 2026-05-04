@@ -243,6 +243,12 @@ export default function RfiStage1Modal({ rfi, onSave, onClose }) {
     if (current && !base.includes(current)) base.unshift(current);
     return base;
   });
+  const [typeOfInspectionOptions, setTypeOfInspectionOptions] = useState(() => {
+    const base = [...INSPECTION_TYPES];
+    const current = (rfi?.typeOfInspection || '').trim();
+    if (current && !base.includes(current)) base.unshift(current);
+    return base;
+  });
   const referDrawingInputRef = useRef(null);
   const [referDrawingUploading, setReferDrawingUploading] = useState(false);
   const [referDrawingProgress, setReferDrawingProgress] = useState(0);
@@ -312,6 +318,23 @@ export default function RfiStage1Modal({ rfi, onSave, onClose }) {
     if (!ok) return;
     setStructureTypeOptions(prev => prev.filter(x => x !== current));
     setForm(f => ({ ...f, structureType: '' }));
+  }
+
+  function addTypeOfInspectionOption() {
+    const val = window.prompt('เพิ่มรายการ Type of Inspection');
+    const next = (val || '').trim();
+    if (!next) return;
+    setTypeOfInspectionOptions(prev => (prev.includes(next) ? prev : [...prev, next]));
+    setForm(f => ({ ...f, typeOfInspection: next }));
+  }
+
+  function removeTypeOfInspectionOption() {
+    const current = (form.typeOfInspection || '').trim();
+    if (!current) return;
+    const ok = window.confirm(`ลบรายการนี้ออกจาก dropdown?\n\n"${current}"`);
+    if (!ok) return;
+    setTypeOfInspectionOptions(prev => prev.filter(x => x !== current));
+    setForm(f => ({ ...f, typeOfInspection: '' }));
   }
 
   const set = (field) => (e) => setForm(f => ({ ...f, [field]: e.target.value }));
@@ -418,9 +441,20 @@ export default function RfiStage1Modal({ rfi, onSave, onClose }) {
               </div>
             </FormField>
             <FormField label="Type of Inspection" required>
-              <Select value={form.typeOfInspection} onChange={set('typeOfInspection')}>
-                {INSPECTION_TYPES.map(t => <option key={t}>{t}</option>)}
-              </Select>
+              <div className="flex items-center gap-1">
+                <Select value={form.typeOfInspection || ''} onChange={set('typeOfInspection')}>
+                  <option value="">— Select Type —</option>
+                  {typeOfInspectionOptions.map(t => <option key={t} value={t}>{t}</option>)}
+                </Select>
+                <button type="button" onClick={addTypeOfInspectionOption} className="p-1.5 rounded bg-green-100 hover:bg-green-200 text-green-700 transition-colors" title="เพิ่ม Type of Inspection">
+                  <Plus size={12} />
+                </button>
+                {form.typeOfInspection && (
+                  <button type="button" onClick={removeTypeOfInspectionOption} className="p-1.5 rounded bg-red-100 hover:bg-red-200 text-red-700 transition-colors" title="ลบ Type of Inspection">
+                    <Trash2 size={12} />
+                  </button>
+                )}
+              </div>
             </FormField>
             <FormField label="Issue Date">
               <Input type="date" value={form.dueDate} onChange={set('dueDate')} />

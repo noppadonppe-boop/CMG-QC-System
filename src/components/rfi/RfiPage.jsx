@@ -1,8 +1,9 @@
-import { useState, useMemo, useRef } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import {
   Plus, Search, Eye, Pencil, ArrowRight, Trash2,
   AlertTriangle, Clock, FileCheck2, Send,
-  ClipboardCheck, X, Download, Upload, Loader2
+  ClipboardCheck, X, Download, Upload, Loader2,
+  Filter, SlidersHorizontal, Check
 } from 'lucide-react';
 import {
   ref as storageRef,
@@ -187,6 +188,136 @@ function getConcreteTestAlerts(rfi) {
     is28Uploaded,
     hasPendingAlert: is7Due || is28Due,
   };
+}
+
+function getRfiFieldValue(rfi, key) {
+  switch (key) {
+    case 'rfiNo': return rfi.rfiNo || '';
+    case 'requestNo': return rfi.requestNo || '';
+    case 'type': return rfi.typeOfInspection || '';
+    case 'tagNo': return rfi.tagNo || '';
+    case 'location': return rfi.location || '';
+    case 'area': return rfi.area || '';
+    case 'dueDate': return rfi.dueDate || '';
+    case 'stage': return STAGES[rfi.stage - 1]?.label || '';
+    case 'statusInsp': return rfi.statusInsp || '';
+    case 'statusDoc': return rfi.statusDoc || '';
+    case 'workingStep': return rfi.workingStep || '';
+    case 'structureType': return rfi.structureType || '';
+    case 'requestedBy': return rfi.requestedBy || '';
+    case 'inspectedBy': return rfi.inspectedBy || '';
+    case 'inspectionPackage': return rfi.inspectionPackage || '';
+    case 'stage3Result': return rfi.result || '';
+    case 'brand': return rfi.brand || '';
+    case 'cementQty': return rfi.cementQty || '';
+    case 'cementUnit': return rfi.cementUnit || '';
+    case 'steelTestResult': return rfi.steelTestResult || '';
+    case 'soilTestResult': return rfi.soilTestResult || '';
+    case 'stage4Status': return rfi.stage4Status || '';
+    default: return '';
+  }
+}
+
+// ── Per-Column Filter Dropdown ─────────────────────────────────────────────────
+function ColumnFilterDropdown({ colKey, label, allDocs, activeValues, onChange }) {
+  const [open, setOpen]     = useState(false);
+  const [search, setSearch] = useState('');
+  const ref                 = useRef(null);
+
+  const options = useMemo(() => {
+    const set = new Set();
+    allDocs.forEach(d => { const v = getRfiFieldValue(d, colKey); if (v) set.add(v); });
+    return [...set].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  }, [allDocs, colKey]);
+
+  const filtered = search ? options.filter(o => o.toLowerCase().includes(search.toLowerCase())) : options;
+  const hasActive = activeValues.length > 0;
+
+  useEffect(() => {
+    if (!open) return;
+    function handler(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  function toggle(val) {
+    onChange(activeValues.includes(val) ? activeValues.filter(v => v !== val) : [...activeValues, val]);
+  }
+
+  function selectAll()   { onChange([...options]); }
+  function clearAll()    { onChange([]); }
+
+  return (
+    <div ref={ref} className="relative inline-flex" onClick={e => e.stopPropagation()}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        title={`Filter by ${label}`}
+        className={`ml-1.5 w-4 h-4 rounded flex items-center justify-center transition-all ${
+          hasActive
+            ? 'bg-orange-500 text-white'
+            : 'text-slate-400 hover:text-white hover:bg-slate-500/20'
+        }`}
+      >
+        <SlidersHorizontal size={9} />
+      </button>
+
+      {open && (
+        <div className="absolute top-6 left-1/2 -translate-x-1/2 z-50 bg-white border border-slate-200 rounded-xl shadow-2xl w-52 overflow-hidden" style={{ minWidth: '180px' }}>
+          {/* Header */}
+          <div className="px-3 py-2 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+            <span className="text-[10px] font-bold text-slate-700 uppercase tracking-wide">{label}</span>
+            <button onClick={() => setOpen(false)} className="text-slate-400 hover:text-slate-600">
+              <X size={11} />
+            </button>
+          </div>
+
+          {/* Search within options */}
+          {options.length > 6 && (
+            <div className="px-2 pt-2">
+              <input
+                className="w-full text-[10px] px-2 py-1 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-orange-400"
+                placeholder="Search…"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+              />
+            </div>
+          )}
+
+          {/* Select all / Clear */}
+          <div className="px-2 pt-1.5 flex gap-1.5">
+            <button onClick={selectAll} className="flex-1 text-[9px] font-semibold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 rounded px-1.5 py-0.5 transition-colors">All</button>
+            <button onClick={clearAll}  className="flex-1 text-[9px] font-semibold text-slate-500 hover:text-slate-700 bg-slate-100 hover:bg-slate-200 rounded px-1.5 py-0.5 transition-colors">Clear</button>
+          </div>
+
+          {/* Options list */}
+          <div className="max-h-48 overflow-y-auto py-1">
+            {filtered.length === 0 && (
+              <div className="px-3 py-3 text-[10px] text-slate-400 text-center">No options</div>
+            )}
+            {filtered.map(val => (
+              <label key={val} className="flex items-center gap-2 px-3 py-1.5 hover:bg-orange-50 cursor-pointer group">
+                <div className={`w-3.5 h-3.5 rounded flex items-center justify-center border transition-all ${
+                  activeValues.includes(val)
+                    ? 'bg-orange-500 border-orange-500'
+                    : 'border-slate-300 group-hover:border-orange-400'
+                }`}>
+                  {activeValues.includes(val) && <Check size={9} className="text-white" />}
+                </div>
+                <input type="checkbox" className="sr-only" checked={activeValues.includes(val)} onChange={() => toggle(val)} />
+                <span className="text-[10px] text-slate-700 truncate" title={val}>{val || '(blank)'}</span>
+              </label>
+            ))}
+          </div>
+
+          {hasActive && (
+            <div className="px-3 py-1.5 border-t border-slate-100 bg-orange-50">
+              <span className="text-[9px] text-orange-600 font-medium">{activeValues.length} selected</span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ── Confirm Delete modal ──────────────────────────────────────────────────────
@@ -544,13 +675,17 @@ export default function RfiPage() {
     return {
       canAdvance: isStage3Rejected ? false : canAdvanceForRfi(rfi),
       canEdit:    isRfiClosed || isStage3Rejected ? false : canEditForStage(s),
-      canDelete:  isRfiClosed || isStage3Rejected ? false : canDeleteRfi,
+      canDelete:  userProfile?.role?.includes('MasterAdmin') ? true : (isRfiClosed || isStage3Rejected ? false : canDeleteRfi),
     };
   }
 
   const [search,       setSearch]       = useState('');
   const [filterType,   setFilterType]   = useState('');
   const [viewMode,     setViewMode]     = useState('kanban');
+
+  const [columnFilters, setColumnFilters] = useState({});
+  function setColFilter(key, vals) { setColumnFilters(prev => ({ ...prev, [key]: vals })); }
+  const FILTERABLE_COLS = ['rfiNo', 'requestNo', 'type', 'tagNo', 'location', 'area', 'dueDate', 'stage', 'statusInsp', 'statusDoc', 'workingStep', 'structureType', 'requestedBy', 'inspectedBy', 'inspectionPackage', 'stage3Result', 'brand', 'cementQty', 'cementUnit', 'steelTestResult', 'soilTestResult', 'stage4Status'];
 
   // Modal states
   const [stage1Modal,   setStage1Modal]  = useState(false);
@@ -571,9 +706,19 @@ export default function RfiPage() {
         (v || '').toLowerCase().includes(search.toLowerCase())
       );
       const matchType = !filterType || r.typeOfInspection === filterType;
-      return matchSearch && matchType;
+      if (!(matchSearch && matchType)) return false;
+
+      // Per-column filters
+      for (const [key, vals] of Object.entries(columnFilters)) {
+        if (!vals || vals.length === 0) continue;
+        const cellVal = getRfiFieldValue(r, key);
+        if (!vals.includes(cellVal)) return false;
+      }
+      return true;
     });
-  }, [projectRfis, search, filterType]);
+  }, [projectRfis, search, filterType, columnFilters]);
+
+  const activeFilterCount = Object.values(columnFilters).filter(v => v && v.length > 0).length;
 
   const types = [...new Set(projectRfis.map(r => r.typeOfInspection))];
 
@@ -851,6 +996,15 @@ export default function RfiPage() {
             <X size={13} /> Clear filters
           </button>
         )}
+        {activeFilterCount > 0 && (
+          <div className="flex items-center gap-1 px-2 py-1 bg-orange-50 border border-orange-200 rounded-lg">
+            <Filter size={10} className="text-orange-500" />
+            <span className="text-[10px] font-semibold text-orange-600">{activeFilterCount} col filter{activeFilterCount > 1 ? 's' : ''}</span>
+            <button onClick={() => setColumnFilters({})} className="ml-0.5 text-orange-400 hover:text-orange-700" title="Clear all column filters">
+              <X size={9} />
+            </button>
+          </div>
+        )}
         <span className="ml-auto text-[11px] text-slate-500">{filtered.length} RFIs</span>
       </div>
 
@@ -878,21 +1032,34 @@ export default function RfiPage() {
           storageKey={`rfi-table-columns:${selectedProjectId || 'all'}`}
           tableId="rfi-table"
           columns={RFI_TABLE_COLUMNS}
-          className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden p-4 pt-3"
+          className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden p-2 pt-0"
         >
           <div className="overflow-x-auto">
-            <table data-column-table="rfi-table" className="w-full text-sm">
+            <table data-column-table="rfi-table" className="w-full text-xs">
               <thead>
                 <tr className="bg-slate-800 text-white">
                   {RFI_TABLE_COLUMNS.map(h => (
-                    <th key={h.key} className="px-3 py-3 text-left font-semibold whitespace-nowrap text-xs tracking-wide">{h.label}</th>
+                    <th key={h.key} className="px-3 py-2 text-left font-semibold whitespace-nowrap text-[10px] tracking-wide">
+                      <div className="flex items-center gap-0.5">
+                        <span>{h.label}</span>
+                        {FILTERABLE_COLS.includes(h.key) && (
+                          <ColumnFilterDropdown
+                            colKey={h.key}
+                            label={h.label}
+                            allDocs={projectRfis}
+                            activeValues={columnFilters[h.key] || []}
+                            onChange={vals => setColFilter(h.key, vals)}
+                          />
+                        )}
+                      </div>
+                    </th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={RFI_TABLE_COLUMNS.length} className="px-3 py-8 text-center text-slate-400">
+                    <td colSpan={RFI_TABLE_COLUMNS.length} className="px-4 py-12 text-center text-slate-400">
                       No RFI records for <span className="font-semibold">{selectedProject?.name}</span>.
                     </td>
                   </tr>
@@ -905,62 +1072,67 @@ export default function RfiPage() {
                     : 'hover:bg-slate-50';
                   const rowTextClass = concreteAlerts.hasPendingAlert ? 'text-red-700' : '';
                   return (
-                    <tr key={rfi.id} className={`transition-colors group ${rowClass}`}>
-                      <td className={`px-3 py-2 font-mono text-xs ${concreteAlerts.hasPendingAlert ? 'text-red-500' : 'text-slate-400'}`}>{idx + 1}</td>
-                      <td className={`px-3 py-2 font-mono font-bold whitespace-nowrap text-sm ${concreteAlerts.hasPendingAlert ? 'text-red-800' : 'text-slate-800'}`}>{rfi.rfiNo}</td>
-                      <td className={`px-3 py-2 font-mono whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.requestNo}</td>
-                      <td className={`px-3 py-2 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-700'}`}>{rfi.typeOfInspection}</td>
-                      <td className={`px-3 py-2 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.tagNo || '—'}</td>
-                      <td className={`px-3 py-2 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.location || '—'}</td>
-                      <td className={`px-3 py-2 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.area || '—'}</td>
-                      <td className={`px-3 py-2 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.requestDateInternal || '—'}</td>
-                      <td className={`px-3 py-2 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.requestTimeInternal || '—'}</td>
-                      <td className={`px-3 py-2 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.requestDateOwner || '—'}</td>
-                      <td className={`px-3 py-2 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.requestTimeOwner || '—'}</td>
-                      <td className={`px-3 py-2 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.workingStep || '—'}</td>
-                      <td className={`px-3 py-2 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.structureType || '—'}</td>
-                      <td className={`px-3 py-2 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.requestedBy || '—'}</td>
-                      <td className={`px-3 py-2 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.inspectedBy || '—'}</td>
-                      <td className={`px-3 py-2 text-xs min-w-[220px] ${rowTextClass || 'text-slate-600'}`}>
+                    <tr 
+                      key={rfi.id} 
+                      className={`transition-colors cursor-pointer select-none group ${rowClass}`}
+                      onDoubleClick={() => setDetailModal(rfi)}
+                      title="Double-click to view details"
+                    >
+                      <td className={`px-3 py-0.5 font-mono text-xs ${concreteAlerts.hasPendingAlert ? 'text-red-500' : 'text-slate-400'}`}>{idx + 1}</td>
+                      <td className={`px-3 py-0.5 font-mono font-bold whitespace-nowrap text-xs ${concreteAlerts.hasPendingAlert ? 'text-red-800' : 'text-slate-800'}`}>{rfi.rfiNo}</td>
+                      <td className={`px-3 py-0.5 font-mono whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.requestNo}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-700'}`}>{rfi.typeOfInspection}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.tagNo || '—'}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.location || '—'}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.area || '—'}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.requestDateInternal || '—'}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.requestTimeInternal || '—'}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.requestDateOwner || '—'}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.requestTimeOwner || '—'}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.workingStep || '—'}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.structureType || '—'}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.requestedBy || '—'}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.inspectedBy || '—'}</td>
+                      <td className={`px-3 py-0.5 text-xs min-w-[220px] ${rowTextClass || 'text-slate-600'}`}>
                         <div className="truncate" title={rfi.detailInspection || '—'}>{rfi.detailInspection || '—'}</div>
                       </td>
-                      <td className={`px-3 py-2 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.dueDate || '—'}</td>
-                      <td className="px-3 py-2">
-                        <span className={`text-xs font-bold px-2 py-1 rounded-full ${stage?.badge}`}>
+                      <td className={`px-3 py-0.5 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.dueDate || '—'}</td>
+                      <td className="px-3 py-0.5">
+                        <span className={`text-[10px] font-bold px-1.5 py-px rounded-full ${stage?.badge}`}>
                           {stage?.label}
                         </span>
                       </td>
-                      <td className={`px-3 py-2 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.inspectionPackage || '—'}</td>
-                      <td className={`px-3 py-2 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.inspectionScheduleDate || '—'}</td>
-                      <td className={`px-3 py-2 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.inspectionScheduleTime || '—'}</td>
-                      <td className={`px-3 py-2 text-xs min-w-[220px] ${rowTextClass || 'text-slate-600'}`}>
+                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.inspectionPackage || '—'}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.inspectionScheduleDate || '—'}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.inspectionScheduleTime || '—'}</td>
+                      <td className={`px-3 py-0.5 text-xs min-w-[220px] ${rowTextClass || 'text-slate-600'}`}>
                         <div className="truncate" title={rfi.descriptionOfInspection || '—'}>{rfi.descriptionOfInspection || '—'}</div>
                       </td>
-                      <td className={`px-3 py-2 text-xs min-w-[200px] ${rowTextClass || 'text-slate-600'}`}>
+                      <td className={`px-3 py-0.5 text-xs min-w-[200px] ${rowTextClass || 'text-slate-600'}`}>
                         <div className="truncate" title={rfi.stage2Note || '—'}>{rfi.stage2Note || '—'}</div>
                       </td>
-                      <td className={`px-3 py-2 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.stage2EmailStatus || '—'}</td>
-                      <td className={`px-3 py-2 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.inspectionDate || '—'}</td>
-                      <td className="px-3 py-2">
-                        <span className={`text-xs font-semibold px-2 py-1 rounded-full ${RESULT_COLORS[rfi.result] || 'bg-slate-100 text-slate-500'}`}>
+                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.stage2EmailStatus || '—'}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.inspectionDate || '—'}</td>
+                      <td className="px-3 py-0.5">
+                        <span className={`text-[10px] font-semibold px-1.5 py-px rounded-full ${RESULT_COLORS[rfi.result] || 'bg-slate-100 text-slate-500'}`}>
                           {rfi.result || '—'}
                         </span>
                       </td>
-                      <td className={`px-3 py-2 text-xs min-w-[200px] ${rowTextClass || 'text-slate-600'}`}>
+                      <td className={`px-3 py-0.5 text-xs min-w-[200px] ${rowTextClass || 'text-slate-600'}`}>
                         <div className="truncate" title={rfi.stage3Note || '—'}>{rfi.stage3Note || '—'}</div>
                       </td>
-                      <td className={`px-3 py-2 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.concretePourDate || '—'}</td>
-                      <td className={`px-3 py-2 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.brand || '—'}</td>
-                      <td className={`px-3 py-2 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.cementQty || '—'}</td>
-                      <td className={`px-3 py-2 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.cementUnit || '—'}</td>
-                      <td className={`px-3 py-2 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.steelTestResult || '—'}</td>
-                      <td className={`px-3 py-2 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.soilTestResult || '—'}</td>
-                      <td className={`px-3 py-2 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.stage4Status || '—'}</td>
-                      <td className={`px-3 py-2 text-xs min-w-[200px] ${rowTextClass || 'text-slate-600'}`}>
+                      <td className={`px-3 py-0.5 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.concretePourDate || '—'}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.brand || '—'}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.cementQty || '—'}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.cementUnit || '—'}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.steelTestResult || '—'}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.soilTestResult || '—'}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.stage4Status || '—'}</td>
+                      <td className={`px-3 py-0.5 text-xs min-w-[200px] ${rowTextClass || 'text-slate-600'}`}>
                         <div className="truncate" title={rfi.stage4Note || '—'}>{rfi.stage4Note || '—'}</div>
                       </td>
-                      <td className="px-3 py-2">
-                        <span className="inline-flex items-center rounded-full bg-green-50 px-2 py-1 text-xs font-semibold text-green-700">
+                      <td className="px-3 py-0.5">
+                        <span className="inline-flex items-center rounded-full bg-green-50 px-2 py-0.5 text-[10px] font-semibold text-green-700">
                           {Math.round(([
                             Array.isArray(rfi.stage4ClientSignFiles) && rfi.stage4ClientSignFiles.length > 0,
                             Array.isArray(rfi.stage4CompleteFiles) && rfi.stage4CompleteFiles.length > 0,
@@ -968,17 +1140,17 @@ export default function RfiPage() {
                           ].filter(Boolean).length / 3) * 100)}%
                         </span>
                       </td>
-                      <td className="px-3 py-2">
-                        <span className={`text-xs font-semibold px-2 py-1 rounded-full ${RESULT_COLORS[rfi.statusInsp] || 'bg-slate-100 text-slate-500'}`}>
+                      <td className="px-3 py-0.5">
+                        <span className={`text-[10px] font-semibold px-1.5 py-px rounded-full ${RESULT_COLORS[rfi.statusInsp] || 'bg-slate-100 text-slate-500'}`}>
                           {rfi.statusInsp || '—'}
                         </span>
                       </td>
-                      <td className="px-3 py-2">
-                        <span className={`text-xs font-semibold px-2 py-1 rounded-full ${RESULT_COLORS[rfi.statusDoc] || 'bg-slate-100 text-slate-500'}`}>
+                      <td className="px-3 py-0.5">
+                        <span className={`text-[10px] font-semibold px-1.5 py-px rounded-full ${RESULT_COLORS[rfi.statusDoc] || 'bg-slate-100 text-slate-500'}`}>
                           {rfi.statusDoc || '—'}
                         </span>
                       </td>
-                      <td className="px-3 py-2 align-middle">
+                      <td className="px-3 py-0.5 align-middle">
                         {rfi.concretePourDate ? (
                           <TestResultUploadCell
                             label={rfi.status7Day || 'Pending'}
@@ -994,7 +1166,7 @@ export default function RfiPage() {
                           <span className="text-xs text-slate-400">—</span>
                         )}
                       </td>
-                      <td className="px-3 py-2 align-middle">
+                      <td className="px-3 py-0.5 align-middle">
                         {rfi.concretePourDate && !concreteAlerts.is7Due ? (
                           <TestResultUploadCell
                             label={rfi.status28Day || 'Pending'}
@@ -1010,41 +1182,41 @@ export default function RfiPage() {
                           <span className="text-xs text-slate-400">—</span>
                         )}
                       </td>
-                      <td className="px-3 py-2">
+                      <td className="px-3 py-0.5">
                         {(() => {
                           const { canAdvance, canEdit, canDelete } = getCardPerms(rfi);
                           const advCfg = STAGE_ADVANCE[rfi.stage];
                           return (
-                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                               <button
                                 onClick={() => setDetailModal(rfi)}
-                                className="w-6 h-6 rounded bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition-colors"
+                                className="w-5 h-5 rounded bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition-colors"
                                 title="View detail"
                               >
-                                <Eye size={10} className="text-slate-600" />
+                                <Eye size={9} className="text-slate-600" />
                               </button>
                               {canEdit && (
                                 <button
                                   onClick={() => openEdit(rfi)}
-                                  className="w-6 h-6 rounded bg-blue-50 hover:bg-blue-100 flex items-center justify-center transition-colors"
+                                  className="w-5 h-5 rounded bg-blue-50 hover:bg-blue-100 flex items-center justify-center transition-colors"
                                   title="Edit Stage 1"
                                 >
-                                  <Pencil size={10} className="text-blue-600" />
+                                  <Pencil size={9} className="text-blue-600" />
                                 </button>
                               )}
                               {canDelete && (
                                 <button
                                   onClick={() => handleDelete(rfi)}
-                                  className="w-6 h-6 rounded bg-red-50 hover:bg-red-100 flex items-center justify-center transition-colors"
+                                  className="w-5 h-5 rounded bg-red-50 hover:bg-red-100 flex items-center justify-center transition-colors"
                                   title="Delete RFI"
                                 >
-                                  <Trash2 size={10} className="text-red-500" />
+                                  <Trash2 size={9} className="text-red-500" />
                                 </button>
                               )}
                               {canAdvance && rfi.stage < 4 && advCfg && (
                                 <button
                                   onClick={() => handleAdvance(rfi)}
-                                  className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-semibold text-white transition-colors ${advCfg.color}`}
+                                  className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold text-white transition-colors ${advCfg.color}`}
                                   title={`Advance to Stage ${rfi.stage + 1}`}
                                 >
                                   <ArrowRight size={8} /> {advCfg.label}

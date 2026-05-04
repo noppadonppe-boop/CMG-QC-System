@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { pdfjs } from 'react-pdf';
 import {
   Upload, FileText, Edit2, Save, X, Loader2,
-  Trash2, ArrowUp, ArrowDown, RefreshCw, ZoomIn, ZoomOut, Plus, Building2,
+  Trash2, ArrowUp, ArrowDown, RefreshCw, ZoomIn, ZoomOut, Plus, Building2, Folder, FolderPlus
 } from 'lucide-react';
 import { storage } from '../../config/firebase';
 import { ref as storageRef, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
@@ -110,6 +110,10 @@ export default function MarkupDwgPage() {
   const [activeBuilding, setActiveBuilding] = useState('');
   const [showBuildingModal, setShowBuildingModal] = useState(false);
   const [newBuildingName, setNewBuildingName] = useState('');
+  
+  const [activeGroup, setActiveGroup] = useState('');
+  const [showGroupModal, setShowGroupModal] = useState(false);
+  const [newGroupName, setNewGroupName] = useState('');
 
   const currentMarkup = useMemo(() => {
     if (!selectedProject) return null;
@@ -117,21 +121,47 @@ export default function MarkupDwgPage() {
   }, [markupDwgItems, selectedProject]);
 
   const buildings = useMemo(() => {
-    return currentMarkup?.buildings || [];
+    const rawBuildings = currentMarkup?.buildings || [];
+    return rawBuildings.map(b => {
+      if (b.groups) return b;
+      return {
+        ...b,
+        groups: [
+          {
+            id: b.id + '-default',
+            name: 'General',
+            pages: b.pages || [],
+            sourceFileName: b.sourceFileName || '',
+            sourcePdfUrl: b.sourcePdfUrl || ''
+          }
+        ]
+      };
+    });
   }, [currentMarkup]);
+
+  const currentBuilding = buildings.find(b => b.id === activeBuilding);
+  const groups = currentBuilding?.groups || [];
+  const currentGroup = groups.find(g => g.id === activeGroup);
 
   useEffect(() => {
     if (!isEditMode) {
-      const currentBuilding = buildings.find(b => b.id === activeBuilding);
-      setDraftPages(currentBuilding?.pages || []);
+      setDraftPages(currentGroup?.pages || []);
     }
-  }, [currentMarkup, isEditMode, activeBuilding, buildings]);
+  }, [currentMarkup, isEditMode, activeGroup, currentGroup]);
 
   useEffect(() => {
     if (buildings.length > 0 && !activeBuilding) {
       setActiveBuilding(buildings[0].id);
     }
   }, [buildings, activeBuilding]);
+
+  useEffect(() => {
+    if (groups.length > 0 && (!activeGroup || !groups.find(g => g.id === activeGroup))) {
+      setActiveGroup(groups[0].id);
+    } else if (groups.length === 0) {
+      setActiveGroup('');
+    }
+  }, [groups, activeGroup]);
 
   async function uploadBlob(blob, path, onProgress) {
     const ref = storageRef(storage, path);
@@ -178,7 +208,7 @@ export default function MarkupDwgPage() {
     const newBuilding = {
       id: createId('building'),
       name: newBuildingName.trim(),
-      pages: [],
+      groups: [],
       createdAt: new Date().toISOString(),
     };
 
@@ -220,8 +250,74 @@ export default function MarkupDwgPage() {
     });
   }
 
+  async function createGroup() {
+    if (!newGroupName.trim() || !selectedProject || !activeBuilding) return;
+    
+    const newGroup = {
+      id: createId('group'),
+      name: newGroupName.trim(),
+      pages: [],
+      createdAt: new Date().toISOString(),
+    };
+
+    const updatedBuildings = buildings.map(b => {
+      if (b.id === activeBuilding) {
+        return {
+          ...b,
+          groups: [...(b.groups || []), newGroup]
+        };
+      }
+      return b;
+    });
+    
+    await saveMarkupRecord({
+      buildings: updatedBuildings,
+    });
+
+    setActiveGroup(newGroup.id);
+    setNewGroupName('');
+    setShowGroupModal(false);
+  }
+
+  async function deleteGroup(groupId) {
+    if (!window.confirm('ต้องการลบกลุ่มนี้และไฟล์ทั้งหมดหรือไม่?')) return;
+    
+    const updatedBuildings = buildings.map(b => {
+      if (b.id === activeBuilding) {
+        return {
+          ...b,
+          groups: b.groups.filter(g => g.id !== groupId)
+        };
+      }
+      return b;
+    });
+    
+    await saveMarkupRecord({
+      buildings: updatedBuildings,
+    });
+  }
+
+  async function renameGroupPrompt(group) {
+    const newName = window.prompt('ชื่อกลุ่มใหม่:', group.name);
+    if (!newName || newName.trim() === group.name) return;
+
+    const updatedBuildings = buildings.map(b => {
+      if (b.id === activeBuilding) {
+        return {
+          ...b,
+          groups: b.groups.map(g => g.id === group.id ? { ...g, name: newName.trim() } : g)
+        };
+      }
+      return b;
+    });
+
+    await saveMarkupRecord({
+      buildings: updatedBuildings,
+    });
+  }
+
   async function convertPdfToPages(pdfFile) {
-    if (!selectedProject || !activeBuilding) return [];
+    if (!selectedProject || !activeBuilding || !activeGroup) return [];
 
     const data = new Uint8Array(await pdfFile.arrayBuffer());
     const pdf = await pdfjs.getDocument({ data }).promise;
@@ -252,7 +348,7 @@ export default function MarkupDwgPage() {
       });
 
       const safeName = pdfFile.name.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9-_]/g, '-');
-      const imagePath = `markup-dwg/${selectedProject.id}/buildings/${activeBuilding}/pages/${safeName}-${String(i).padStart(2, '0')}-${Date.now()}.png`;
+      const imagePath = `markup-dwg/${selectedProject.id}/buildings/${activeBuilding}/groups/${activeGroup}/pages/${safeName}-${String(i).padStart(2, '0')}-${Date.now()}.png`;
       const imageUrl = await uploadBlob(blob, imagePath);
 
       pages.push({
@@ -267,22 +363,31 @@ export default function MarkupDwgPage() {
   }
 
   async function handlePdfUpload(file) {
-    if (!file || !selectedProject || !activeBuilding) return;
+    if (!file || !selectedProject || !activeBuilding || !activeGroup) return;
 
     try {
       setBusyLabel('Uploading original PDF');
       setBusyProgress(0);
 
-      const pdfPath = `markup-dwg/${selectedProject.id}/buildings/${activeBuilding}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9-_.]/g, '-')}`;
+      const pdfPath = `markup-dwg/${selectedProject.id}/buildings/${activeBuilding}/groups/${activeGroup}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9-_.]/g, '-')}`;
       const pdfUrl = await uploadBlob(file, pdfPath, setBusyProgress);
 
       const pages = await convertPdfToPages(file);
       
-      const updatedBuildings = buildings.map(b => 
-        b.id === activeBuilding 
-          ? { ...b, sourceFileName: file.name, sourcePdfUrl: pdfUrl, pages }
-          : b
-      );
+      const updatedBuildings = buildings.map(b => {
+        if (b.id === activeBuilding) {
+          return {
+            ...b,
+            groups: b.groups.map(g => {
+              if (g.id === activeGroup) {
+                return { ...g, sourceFileName: file.name, sourcePdfUrl: pdfUrl, pages };
+              }
+              return g;
+            })
+          };
+        }
+        return b;
+      });
 
       await saveMarkupRecord({
         buildings: updatedBuildings,
@@ -321,14 +426,14 @@ export default function MarkupDwgPage() {
   }
 
   async function handleReplaceImage(file) {
-    if (!file || !replaceTargetId || !selectedProject || !activeBuilding) return;
+    if (!file || !replaceTargetId || !selectedProject || !activeBuilding || !activeGroup) return;
 
     try {
       setBusyLabel('Replacing page image');
       setBusyProgress(0);
 
       const ext = getFileExtension(file.name, 'png');
-      const path = `markup-dwg/${selectedProject.id}/buildings/${activeBuilding}/manual/${Date.now()}-replace.${ext}`;
+      const path = `markup-dwg/${selectedProject.id}/buildings/${activeBuilding}/groups/${activeGroup}/manual/${Date.now()}-replace.${ext}`;
       const url = await uploadBlob(file, path, setBusyProgress);
 
       setDraftPages(prev => prev.map(page => (
@@ -348,14 +453,12 @@ export default function MarkupDwgPage() {
   }
 
   function beginEdit() {
-    const currentBuilding = buildings.find(b => b.id === activeBuilding);
-    setDraftPages(currentBuilding?.pages || []);
+    setDraftPages(currentGroup?.pages || []);
     setIsEditMode(true);
   }
 
   function cancelEdit() {
-    const currentBuilding = buildings.find(b => b.id === activeBuilding);
-    setDraftPages(currentBuilding?.pages || []);
+    setDraftPages(currentGroup?.pages || []);
     setIsEditMode(false);
   }
 
@@ -374,26 +477,34 @@ export default function MarkupDwgPage() {
   }
 
   async function saveDraftPages() {
-    if (!selectedProject || !canSave || !activeBuilding) return;
+    if (!selectedProject || !canSave || !activeBuilding || !activeGroup) return;
 
     try {
       setBusyLabel('Saving markup pages');
       setBusyProgress(100);
 
-      const currentBuilding = buildings.find(b => b.id === activeBuilding);
-      const updatedBuildings = buildings.map(b => 
-        b.id === activeBuilding 
-          ? {
-              ...b,
-              sourceFileName: currentBuilding?.sourceFileName || 'Markup Pages',
-              sourcePdfUrl: currentBuilding?.sourcePdfUrl || '',
-              pages: draftPages.map((page, index) => ({
-                ...page,
-                order: index,
-              })),
-            }
-          : b
-      );
+      const updatedBuildings = buildings.map(b => {
+        if (b.id === activeBuilding) {
+          return {
+            ...b,
+            groups: b.groups.map(g => {
+              if (g.id === activeGroup) {
+                return {
+                  ...g,
+                  sourceFileName: currentGroup?.sourceFileName || 'Markup Pages',
+                  sourcePdfUrl: currentGroup?.sourcePdfUrl || '',
+                  pages: draftPages.map((page, index) => ({
+                    ...page,
+                    order: index,
+                  }))
+                };
+              }
+              return g;
+            })
+          };
+        }
+        return b;
+      });
 
       await saveMarkupRecord({
         buildings: updatedBuildings,
@@ -409,8 +520,7 @@ export default function MarkupDwgPage() {
     }
   }
 
-  const currentBuilding = buildings.find(b => b.id === activeBuilding);
-  const visiblePages = isEditMode ? draftPages : (currentBuilding?.pages || []);
+  const visiblePages = isEditMode ? draftPages : (currentGroup?.pages || []);
 
   function zoomOut() {
     setZoom(prev => Math.max(0, prev - 10));
@@ -427,10 +537,10 @@ export default function MarkupDwgPage() {
           <div className="min-w-0">
             <div className="flex items-center gap-3">
               <h1 className="text-lg font-bold text-slate-800">Markup RFI</h1>
-              {currentBuilding?.sourceFileName && (
+              {currentGroup?.sourceFileName && (
                 <div className="flex items-center gap-2 text-sm text-slate-600">
                   <FileText size={16} />
-                  <span className="truncate">{currentBuilding.sourceFileName}</span>
+                  <span className="truncate">{currentGroup.sourceFileName}</span>
                 </div>
               )}
             </div>
@@ -474,14 +584,14 @@ export default function MarkupDwgPage() {
             <button
               type="button"
               onClick={() => pdfInputRef.current?.click()}
-              disabled={!!busyLabel || !activeBuilding}
+              disabled={!!busyLabel || !activeBuilding || !activeGroup}
               className="inline-flex items-center gap-2 rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-orange-600 disabled:opacity-50"
             >
               {busyLabel ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
-              {currentBuilding?.pages?.length ? 'Replace PDF' : 'Upload PDF'}
+              {currentGroup?.pages?.length ? 'Replace PDF' : 'Upload PDF'}
             </button>
 
-            {!!currentBuilding && !isEditMode && canEdit && (
+            {!!currentGroup && !isEditMode && canEdit && (
               <button
                 type="button"
                 onClick={beginEdit}
@@ -626,6 +736,58 @@ export default function MarkupDwgPage() {
         </div>
       )}
 
+      {/* Group Modal */}
+      {showGroupModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowGroupModal(false)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center shrink-0">
+                <FolderPlus size={18} className="text-blue-600" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-800">สร้างกลุ่มใหม่</h3>
+                <p className="text-xs text-slate-500 mt-0.5">กรอกชื่อกลุ่มเพื่อแบ่งหมวดหมู่</p>
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-600 block mb-2">ชื่อกลุ่ม</label>
+              <input
+                type="text"
+                value={newGroupName}
+                onChange={(e) => setNewGroupName(e.target.value)}
+                placeholder="เช่น Architectural, Structural, MEP"
+                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && newGroupName.trim()) {
+                    createGroup();
+                  }
+                }}
+                autoFocus
+              />
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setShowGroupModal(false);
+                  setNewGroupName('');
+                }}
+                className="flex-1 px-4 py-2 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+              >
+                ยกเลิก
+              </button>
+              <button
+                onClick={createGroup}
+                disabled={!newGroupName.trim()}
+                className="flex-1 px-4 py-2 text-xs font-semibold text-white bg-blue-500 hover:bg-blue-600 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                สร้างกลุ่ม
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Building Tabs */}
       {buildings.length > 0 && (
         <div className="border-b border-slate-200 bg-white px-5">
@@ -643,9 +805,9 @@ export default function MarkupDwgPage() {
                 >
                   <Building2 size={16} />
                   {building.name}
-                  {building.pages?.length > 0 && (
+                  {building.groups?.length > 0 && (
                     <span className="ml-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
-                      {building.pages.length}
+                      {building.groups.length}
                     </span>
                   )}
                 </button>
@@ -681,6 +843,76 @@ export default function MarkupDwgPage() {
         </div>
       )}
 
+      {/* Group Tabs */}
+      {buildings.length > 0 && activeBuilding && (
+        <div className="border-b border-slate-100 bg-slate-50/50 px-5">
+          <div className="flex items-center gap-2 overflow-x-auto py-2">
+            <button
+              type="button"
+              onClick={() => setShowGroupModal(true)}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-dashed border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:border-slate-400 hover:bg-slate-100"
+            >
+              <FolderPlus size={14} />
+              สร้างกลุ่ม
+            </button>
+            
+            {groups.length > 0 && <div className="mx-1 h-4 w-px bg-slate-300" />}
+
+            {groups.map(group => (
+              <div key={group.id} className="group relative shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setActiveGroup(group.id)}
+                  className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                    activeGroup === group.id
+                      ? 'bg-blue-100 text-blue-700'
+                      : 'bg-white text-slate-600 hover:bg-slate-100'
+                  } border ${
+                    activeGroup === group.id ? 'border-blue-200' : 'border-slate-200'
+                  }`}
+                >
+                  <Folder size={14} />
+                  {group.name}
+                  {group.pages?.length > 0 && (
+                    <span className={`ml-1 rounded-full px-1.5 py-0.5 text-[9px] font-semibold ${
+                      activeGroup === group.id ? 'bg-blue-200 text-blue-800' : 'bg-slate-100 text-slate-600'
+                    }`}>
+                      {group.pages.length}
+                    </span>
+                  )}
+                </button>
+                {canEdit && (
+                  <div className="absolute -right-1 -top-1 hidden gap-1 group-hover:flex">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        renameGroupPrompt(group);
+                      }}
+                      className="rounded-full bg-blue-500 p-1 text-white shadow-sm hover:bg-blue-600"
+                      title="เปลี่ยนชื่อกลุ่ม"
+                    >
+                      <Edit2 size={8} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deleteGroup(group.id);
+                      }}
+                      className="rounded-full bg-red-500 p-1 text-white shadow-sm hover:bg-red-600"
+                      title="ลบกลุ่ม"
+                    >
+                      <Trash2 size={8} />
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="flex-1 overflow-y-auto p-5">
         {buildings.length === 0 ? (
           <div className="flex h-full items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white">
@@ -700,13 +932,31 @@ export default function MarkupDwgPage() {
               </button>
             </div>
           </div>
+        ) : groups.length === 0 ? (
+          <div className="flex h-full items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white">
+            <div className="max-w-md text-center">
+              <Folder size={48} className="mx-auto mb-4 text-slate-400" />
+              <h2 className="text-lg font-semibold text-slate-700">ยังไม่มีกลุ่มในอาคารนี้</h2>
+              <p className="mt-2 text-sm text-slate-500">
+                เริ่มต้นด้วยการสร้างกลุ่มเพื่อแยกหมวดหมู่เอกสาร เช่น โครงสร้าง, สถาปัตย์, งานระบบ
+              </p>
+              <button
+                type="button"
+                onClick={() => setShowGroupModal(true)}
+                className="mt-5 inline-flex items-center gap-2 rounded-lg bg-blue-500 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-600"
+              >
+                <FolderPlus size={16} />
+                สร้างกลุ่มแรก
+              </button>
+            </div>
+          </div>
         ) : !visiblePages.length ? (
           <div className="flex h-full items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white">
             <div className="max-w-md text-center">
               <Upload size={48} className="mx-auto mb-4 text-slate-400" />
-              <h2 className="text-lg font-semibold text-slate-700">ยังไม่มีไฟล์ในอาคารนี้</h2>
+              <h2 className="text-lg font-semibold text-slate-700">ยังไม่มีไฟล์ในกลุ่มนี้</h2>
               <p className="mt-2 text-sm text-slate-500">
-                อัพโหลด PDF และระบบจะแปลงเป็นรูปภาพแต่ละหน้าสำหรับอาคาร {currentBuilding?.name}
+                อัพโหลด PDF และระบบจะแปลงเป็นรูปภาพแต่ละหน้าสำหรับกลุ่ม {currentGroup?.name} ในอาคาร {currentBuilding?.name}
               </p>
               <button
                 type="button"
