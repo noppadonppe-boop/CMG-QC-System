@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ref as storageRef,
   uploadBytesResumable,
@@ -13,6 +13,7 @@ import { Upload, X, Loader2, Paperclip, FileText, Image, FileSpreadsheet, Plus, 
 const CATEGORIES = ['Structural', 'Architectural', 'Mechanical', 'Electrical', 'Civil', 'HVAC', 'Plumbing', 'Landscape', 'Other'];
 const CATEGORY_GROUPS = ['Work method', 'Material approved', 'Drawing'];
 const STATUSES   = ['Approved', 'For Construction', 'For Review', 'For Approve', 'As-Built', 'Superseded', 'Void'];
+const STATUS_STORAGE_KEY = 'cmg-qc-doc-status-options';
 
 const ALLOWED_MIME = [
   'application/pdf',
@@ -25,6 +26,22 @@ const MAX_SIZE_MB  = null; // ไม่จำกัดขนาดไฟล์
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
+}
+
+function readStoredStatusOptions() {
+  if (typeof window === 'undefined') return [...STATUSES];
+  try {
+    const raw = window.localStorage.getItem(STATUS_STORAGE_KEY);
+    if (!raw) return [...STATUSES];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [...STATUSES];
+    const cleaned = parsed
+      .map((item) => String(item || '').trim())
+      .filter(Boolean);
+    return cleaned.length ? [...new Set(cleaned)] : [...STATUSES];
+  } catch {
+    return [...STATUSES];
+  }
 }
 
 /**
@@ -191,6 +208,7 @@ function FileUploader({ label, required, transmittalNo, namePrefix, files, setFi
 export default function QcDocModal({ doc, onSave, onClose, projectDocs = [], isDuplicate = false }) {
   const { selectedProjectId, projects } = useApp();
   const selectedProject = projects.find(p => p.id === selectedProjectId);
+  const storedStatusOptions = readStoredStatusOptions();
 
   // Generate TR number for new/duplicate: TR-{ProjectNo ไม่มี -}-0001
   const autoTrNo = generateTransmittalNo(selectedProject?.projectNo ?? '', projectDocs);
@@ -207,6 +225,10 @@ export default function QcDocModal({ doc, onSave, onClose, projectDocs = [], isD
     }
     // Add / Duplicate
     const base = isDuplicate && doc ? { ...doc } : {};
+    const preferredStatus = base.status ?? 'For Review';
+    const nextStatus = storedStatusOptions.includes(preferredStatus)
+      ? preferredStatus
+      : (storedStatusOptions[0] || '');
     return {
       transmittalNoRef: base.transmittalNoRef ?? '',
       isExternal:     typeof base.isExternal === 'boolean' ? base.isExternal : false,
@@ -220,7 +242,7 @@ export default function QcDocModal({ doc, onSave, onClose, projectDocs = [], isD
       documentTitle:  isDuplicate ? `${base.documentTitle ?? ''} (Copy)` : '',
       receiveDate:    base.receiveDate    ?? '',
       rev:            '',
-      status:         base.status         ?? 'For Review',
+      status:         nextStatus,
       attachments:    [],
       docTitleFiles:  [],
       projectNo:      selectedProject?.projectNo ?? '', // ใช้โปรเจกต์ที่เลือกไว้ด้านบน
@@ -231,12 +253,21 @@ export default function QcDocModal({ doc, onSave, onClose, projectDocs = [], isD
   const [attachments,   setAttachments]   = useState(form.attachments);
   const [docTitleFiles, setDocTitleFiles] = useState(form.docTitleFiles);
   const [submitting,    setSubmitting]    = useState(false);
-  const [docRows,       setDocRows]      = useState([{ documentNo: '', rev: '', receiveDate: '' }]);
+  const [docRows,       setDocRows]       = useState([{ documentNo: '', rev: '', receiveDate: '' }]);
+  const [statusOptions, setStatusOptions] = useState(() => {
+    const base = readStoredStatusOptions();
+    const current = String(doc?.status || '').trim();
+    if (doc && !isDuplicate && current && !base.includes(current)) base.unshift(current);
+    return base;
+  });
 
   const isEdit     = !!doc && !isDuplicate;
   const trNo       = isEdit ? form.transmittalNo : autoTrNo;
 
-
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(STATUS_STORAGE_KEY, JSON.stringify(statusOptions));
+  }, [statusOptions]);
 
   function addDocRow() {
     setDocRows(prev => [...prev, { documentNo: '', rev: '', receiveDate: '' }]);
@@ -255,6 +286,24 @@ export default function QcDocModal({ doc, onSave, onClose, projectDocs = [], isD
       const val = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
       setForm(f => ({ ...f, [field]: val }));
     };
+  }
+
+  function addStatusOption() {
+    const val = window.prompt('เพิ่มรายการ Status');
+    const next = String(val || '').trim();
+    if (!next) return;
+    setStatusOptions((prev) => (prev.includes(next) ? prev : [...prev, next]));
+    setForm((prev) => ({ ...prev, status: next }));
+  }
+
+  function removeStatusOption() {
+    const current = String(form.status || '').trim();
+    if (!current) return;
+    const ok = window.confirm(`ลบรายการนี้ออกจาก Status?\n\n"${current}"`);
+    if (!ok) return;
+    const nextOptions = statusOptions.filter((item) => item !== current);
+    setStatusOptions(nextOptions);
+    setForm((prev) => ({ ...prev, status: nextOptions[0] || '' }));
   }
 
   async function handleSubmit(e) {
@@ -397,7 +446,7 @@ export default function QcDocModal({ doc, onSave, onClose, projectDocs = [], isD
             <FormField label="Rev." required>
               <Input value={form.rev} onChange={setField('rev')} placeholder="A" maxLength={4} required />
             </FormField>
-            <FormField label="Receive Date">
+            <FormField label="Stamp Date">
               <Input type="date" value={form.receiveDate} onChange={setField('receiveDate')} />
             </FormField>
           </FormGrid>
@@ -420,7 +469,7 @@ export default function QcDocModal({ doc, onSave, onClose, projectDocs = [], isD
                     <th className="px-3 py-2 text-left font-semibold text-slate-600 w-10">#</th>
                     <th className="px-3 py-2 text-left font-semibold text-slate-600">Document No. <span className="text-red-500">*</span></th>
                     <th className="px-3 py-2 text-left font-semibold text-slate-600 w-24">Rev. <span className="text-red-500">*</span></th>
-                    <th className="px-3 py-2 text-left font-semibold text-slate-600 w-40">Receive Date</th>
+                    <th className="px-3 py-2 text-left font-semibold text-slate-600 w-40">Stamp Date</th>
                     <th className="px-3 py-2 w-10"></th>
                   </tr>
                 </thead>
@@ -493,9 +542,34 @@ export default function QcDocModal({ doc, onSave, onClose, projectDocs = [], isD
             </Select>
           </FormField>
           <FormField label="Status">
-            <Select value={form.status} onChange={setField('status')}>
-              {STATUSES.map(s => <option key={s}>{s}</option>)}
-            </Select>
+            <div className="flex items-center gap-2">
+              <Select value={form.status || ''} onChange={setField('status')}>
+                <option value="">— Select —</option>
+                {statusOptions.map((status) => (
+                  <option key={status} value={status}>{status}</option>
+                ))}
+                {!!form.status && !statusOptions.includes(form.status) && (
+                  <option value={form.status}>{form.status}</option>
+                )}
+              </Select>
+              <button
+                type="button"
+                onClick={addStatusOption}
+                className="w-9 h-9 rounded-lg border border-slate-200 bg-white hover:border-orange-400 hover:bg-orange-50 flex items-center justify-center transition-colors"
+                title="เพิ่มรายการ Status"
+              >
+                <Plus size={16} className="text-slate-600" />
+              </button>
+              <button
+                type="button"
+                onClick={removeStatusOption}
+                disabled={!form.status}
+                className="w-9 h-9 rounded-lg border border-slate-200 bg-white hover:border-red-400 hover:bg-red-50 flex items-center justify-center transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                title="ลบรายการ Status ที่เลือก"
+              >
+                <Trash2 size={16} className="text-slate-600" />
+              </button>
+            </div>
           </FormField>
           <FormField label="Delivery Method">
             <div className="flex items-center gap-4 mt-1.5">

@@ -1,7 +1,7 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import {
   Plus, Pencil, Trash2, Search, ExternalLink,
-  Layers, ChevronDown, ChevronRight, History, Eye, EyeOff,
+  Layers, ChevronDown, ChevronLeft, ChevronRight, History, Eye, EyeOff,
   FileText, Filter, Copy, SlidersHorizontal, X, Check
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
@@ -47,7 +47,7 @@ const QC_DOC_TABLE_COLUMNS = [
   { key: 'cat', label: 'Category' },
   { key: 'documentNo', label: 'Document No.' },
   { key: 'documentTitle', label: 'Document Title' },
-  { key: 'receiveDate', label: 'Receive Date' },
+  { key: 'receiveDate', label: 'Stamp Date' },
   { key: 'revision', label: 'Revision' },
   { key: 'status', label: 'Status' },
   { key: 'delivery', label: 'Delivery' },
@@ -243,7 +243,7 @@ function DocDetailModal({ doc, onClose, onEdit, onDelete }) {
             { label: 'Transmittal No.', value: doc.transmittalNo },
             { label: 'Trans. Ref',      value: doc.transmittalNoRef || '—' },
             { label: 'Trans. Date',     value: doc.transmittalDate || '—' },
-            { label: 'Receive Date',    value: doc.receiveDate || '—' },
+            { label: 'Stamp Date',      value: doc.receiveDate || '—' },
             { label: 'From',            value: doc.from || '—' },
             { label: 'Type',            value: doc.isExternal ? 'External' : 'Internal' },
             { label: 'Category Group',  value: doc.categoryGroup || '—' },
@@ -300,13 +300,34 @@ function revOrder(rev) {
   return val;
 }
 
+function transmittalOrder(transmittalNo = '') {
+  const normalized = String(transmittalNo || '').trim();
+  if (!normalized) return Number.NEGATIVE_INFINITY;
+
+  const parts = normalized.match(/\d+/g);
+  if (!parts?.length) return Number.NEGATIVE_INFINITY;
+
+  // Prefer the last numeric block because generated transmittals increment there.
+  return parseInt(parts[parts.length - 1], 10);
+}
+
+function compareDocsForLatest(a, b) {
+  const revDiff = revOrder(a?.rev || '') - revOrder(b?.rev || '');
+  if (revDiff !== 0) return revDiff;
+
+  const transmittalDiff = transmittalOrder(a?.transmittalNo) - transmittalOrder(b?.transmittalNo);
+  if (transmittalDiff !== 0) return transmittalDiff;
+
+  return String(a?.transmittalNo || '').localeCompare(String(b?.transmittalNo || ''), undefined, { numeric: true });
+}
+
 function getLatestRevDocs(docs) {
   const grouped = {};
   for (const doc of docs) {
     if (!grouped[doc.documentNo]) {
       grouped[doc.documentNo] = doc;
     } else {
-      if (revOrder(doc.rev) > revOrder(grouped[doc.documentNo].rev)) {
+      if (compareDocsForLatest(doc, grouped[doc.documentNo]) > 0) {
         grouped[doc.documentNo] = doc;
       }
     }
@@ -320,7 +341,12 @@ function AttachmentLinks({ doc }) {
     return (
       <div className="flex flex-col gap-0.5">
         {doc.attachments.map((f, i) => (
-          <a key={i} href={f.url} target="_blank" rel="noopener noreferrer"
+          <a
+            key={i}
+            href={f.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
             className="flex items-center gap-1 text-[11px] text-blue-600 hover:text-blue-800 whitespace-nowrap">
             <ExternalLink size={10} />{f.name}
           </a>
@@ -330,7 +356,11 @@ function AttachmentLinks({ doc }) {
   }
   if (doc.drawingLink) {
     return (
-      <a href={doc.drawingLink} target="_blank" rel="noopener noreferrer"
+      <a
+        href={doc.drawingLink}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={(e) => e.stopPropagation()}
         className="flex items-center gap-1 text-[11px] text-blue-600 hover:text-blue-800 whitespace-nowrap">
         <ExternalLink size={11} /> Open
       </a>
@@ -347,7 +377,12 @@ function TitleCell({ doc, isHistory }) {
       {Array.isArray(doc.docTitleFiles) && doc.docTitleFiles.length > 0 && (
         <div className="flex flex-col gap-0.5 mt-0.5">
           {doc.docTitleFiles.map((f, i) => (
-            <a key={i} href={f.url} target="_blank" rel="noopener noreferrer"
+            <a
+              key={i}
+              href={f.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
               className="flex items-center gap-1 text-[10px] text-purple-600 hover:text-purple-800 whitespace-nowrap">
               <ExternalLink size={9} />{f.name}
             </a>
@@ -365,8 +400,8 @@ function DocRow({ doc, isLatest, isHistory, onEdit, onDelete, onDuplicate, onVie
       className={`group transition-colors cursor-pointer select-none ${
         isHistory ? 'bg-slate-50/60 text-slate-400' : 'hover:bg-orange-50/60'
       }`}
-      onDoubleClick={() => onView && onView(doc)}
-      title="Double-click to view details"
+      onClick={() => onView && onView(doc)}
+      title="Click to view details"
     >
       <td className="px-3 py-0.5 text-slate-400 font-mono text-xs">{rowIndex}</td>
       <td className="px-3 py-0.5 font-mono text-slate-700 whitespace-nowrap text-xs">{doc.transmittalNo}</td>
@@ -417,11 +452,13 @@ function DocRow({ doc, isLatest, isHistory, onEdit, onDelete, onDuplicate, onVie
 function DocGroup({ docNo, docs, latestId, showAllRevs, onEdit, onDelete, onDuplicate, onView, startIndex }) {
   const [expanded, setExpanded] = useState(false);
   const latestDoc   = docs.find(d => d.id === latestId);
-  const historyDocs = docs.filter(d => d.id !== latestId).sort((a, b) => revOrder(b.rev) - revOrder(a.rev));
+  const historyDocs = docs
+    .filter(d => d.id !== latestId)
+    .sort((a, b) => compareDocsForLatest(b, a));
   const hasHistory  = historyDocs.length > 0;
 
   if (showAllRevs) {
-    const sorted = [...docs].sort((a, b) => revOrder(b.rev) - revOrder(a.rev));
+    const sorted = [...docs].sort((a, b) => compareDocsForLatest(b, a));
     return sorted.map((doc, i) => (
       <DocRow
         key={doc.id}
@@ -440,8 +477,8 @@ function DocGroup({ docNo, docs, latestId, showAllRevs, onEdit, onDelete, onDupl
     <>
       <tr
         className="group hover:bg-orange-50/60 transition-colors cursor-pointer select-none"
-        onDoubleClick={() => onView && onView(latestDoc)}
-        title="Double-click to view details"
+        onClick={() => onView && onView(latestDoc)}
+        title="Click to view details"
       >
         <td className="px-3 py-0.5 text-slate-400 font-mono text-xs">{startIndex}</td>
         <td className="px-3 py-0.5 font-mono text-slate-700 whitespace-nowrap text-xs">{latestDoc?.transmittalNo}</td>
@@ -510,9 +547,11 @@ function DocGroup({ docNo, docs, latestId, showAllRevs, onEdit, onDelete, onDupl
 export default function QcDocumentsPage() {
   const { qcDocuments, addQcDocument, updateQcDocument, deleteQcDocument, selectedProjectId, selectedProject } = useApp();
   const { canAction } = useMenuPermissions();
+  const PAGE_SIZE = 20;
 
   const [showAllRevs,    setShowAllRevs]    = useState(false);
   const [search,         setSearch]         = useState('');
+  const [currentPage,    setCurrentPage]    = useState(1);
   const [columnFilters,  setColumnFilters]  = useState({});
   const [modalMode,      setModalMode]      = useState(null);
   const [editTarget,     setEditTarget]     = useState(null);
@@ -570,7 +609,7 @@ export default function QcDocumentsPage() {
     }
     // For each group, find latest id
     const result = Object.entries(map).map(([docNo, docs]) => {
-      const latest = docs.reduce((best, d) => revOrder(d.rev) > revOrder(best.rev) ? d : best);
+      const latest = docs.reduce((best, d) => compareDocsForLatest(d, best) > 0 ? d : best);
       return { docNo, docs, latestId: latest.id, latestDocId: latest.id };
     });
     // Default sort: newest uploaded first (by id descending — id is doc-${Date.now()}-${i})
@@ -585,9 +624,21 @@ export default function QcDocumentsPage() {
   // Counts
   const totalDocs   = filtered.length;
   const uniqueDocs  = grouped.length;
+  const totalPages  = Math.max(1, Math.ceil(uniqueDocs / PAGE_SIZE));
+  const pageStart   = (currentPage - 1) * PAGE_SIZE;
+  const pagedGrouped = grouped.slice(pageStart, pageStart + PAGE_SIZE);
+  const pageEnd     = pageStart + pagedGrouped.length;
 
   // Active column filter count (for badge)
   const activeFilterCount = Object.values(columnFilters).filter(v => v && v.length > 0).length;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, columnFilters, selectedProjectId]);
+
+  useEffect(() => {
+    setCurrentPage(prev => Math.min(prev, totalPages));
+  }, [totalPages]);
 
   function handleSave(formOrArray) {
     if (modalMode === 'edit') {
@@ -690,6 +741,7 @@ export default function QcDocumentsPage() {
 
         <span className="ml-auto text-[10px] text-slate-400">
           {showAllRevs ? `${totalDocs} records` : `${uniqueDocs} docs · newest first`}
+          {uniqueDocs > 0 ? ` • ${PAGE_SIZE} per page` : ''}
         </span>
       </div>
 
@@ -734,8 +786,8 @@ export default function QcDocumentsPage() {
                   </td>
                 </tr>
               )}
-              {grouped.map(({ docNo, docs, latestId }) => {
-                rowCounter++;
+              {pagedGrouped.map(({ docNo, docs, latestId }, index) => {
+                rowCounter = pageStart + index + 1;
                 const idx = rowCounter;
                 return (
                   <DocGroup
@@ -757,7 +809,8 @@ export default function QcDocumentsPage() {
         </div>
 
         {/* Footer */}
-        <div className="px-4 py-3 border-t border-slate-100 bg-slate-50 flex items-center gap-4 text-[11px] text-slate-500">
+        <div className="px-4 py-3 border-t border-slate-100 bg-slate-50 flex items-center justify-between gap-4 flex-wrap text-[11px] text-slate-500">
+          <div className="flex items-center gap-4 flex-wrap">
           <span className="flex items-center gap-1.5">
             <Layers size={12} className="text-slate-400" />
             {uniqueDocs} unique document numbers
@@ -766,10 +819,41 @@ export default function QcDocumentsPage() {
             <History size={12} className="text-slate-400" />
             {totalDocs - uniqueDocs} older revisions on record
           </span>
+          {uniqueDocs > 0 && (
+            <span>
+              Showing {pageStart + 1}-{pageEnd} of {uniqueDocs}
+            </span>
+          )}
           {!showAllRevs && (
             <span className="text-orange-600 font-medium">
               ✦ Showing latest revision per document. Use "Show All Revisions" to view full history.
             </span>
+          )}
+        </div>
+          {uniqueDocs > PAGE_SIZE && (
+            <div className="flex items-center gap-2 ml-auto">
+              <button
+                type="button"
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed hover:border-slate-300"
+              >
+                <ChevronLeft size={12} />
+                Prev
+              </button>
+              <span className="min-w-[72px] text-center text-slate-600 font-medium">
+                Page {currentPage} / {totalPages}
+              </span>
+              <button
+                type="button"
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed hover:border-slate-300"
+              >
+                Next
+                <ChevronRight size={12} />
+              </button>
+            </div>
           )}
         </div>
       </TableColumnVisibility>

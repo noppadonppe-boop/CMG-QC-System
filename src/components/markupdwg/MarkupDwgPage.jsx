@@ -23,12 +23,45 @@ function getFileExtension(name = '', fallback = 'png') {
   return ext || fallback;
 }
 
+function getBaseFileName(name = '') {
+  return name.replace(/\.[^.]+$/, '');
+}
+
+function sortPagesByOrder(pages = []) {
+  return [...pages].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+}
+
+function buildPageName(pageTitle, fileName, pageNumber, totalPages) {
+  const fallbackTitle = getBaseFileName(fileName) || 'Markup Page';
+  const resolvedTitle = pageTitle?.trim() || fallbackTitle;
+  if (totalPages <= 1) return resolvedTitle;
+  return `${resolvedTitle} - Page ${pageNumber}`;
+}
+
+function isPdfFile(file) {
+  if (!file) return false;
+  return file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+}
+
+function formatPageDate(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const year = date.getFullYear();
+  return `${day}.${month}.${year}`;
+}
+
 function PageCard({ page, index, isEditMode, onMoveUp, onMoveDown, onDelete, onReplace, totalPages, zoom }) {
+  const pageLabel = formatPageDate(page.createdAt) || `Page ${index + 1}`;
+
   return (
     <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
       <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
         <div className="min-w-0">
-          <div className="text-sm font-bold text-slate-800">Page {index + 1}</div>
+          <div className="text-sm font-bold text-slate-800">{pageLabel}</div>
           <div className="text-[11px] text-slate-500 truncate">{page.name || `Page ${index + 1}`}</div>
         </div>
         {isEditMode && (
@@ -97,14 +130,15 @@ export default function MarkupDwgPage() {
   const canEdit = canAction('markup-dwg', 'editMarkup');
   const canSave = canAction('markup-dwg', 'saveMarkup');
 
-  const pdfInputRef = useRef(null);
-  const addPdfInputRef = useRef(null);
+  const uploadFileInputRef = useRef(null);
   const replaceImageInputRef = useRef(null);
 
   const [isEditMode, setIsEditMode] = useState(false);
   const [busyLabel, setBusyLabel] = useState('');
   const [busyProgress, setBusyProgress] = useState(0);
   const [draftPages, setDraftPages] = useState([]);
+  const [draftSourceFileName, setDraftSourceFileName] = useState('');
+  const [draftSourcePdfUrl, setDraftSourcePdfUrl] = useState('');
   const [replaceTargetId, setReplaceTargetId] = useState('');
   const [zoom, setZoom] = useState(100);
   const [activeBuilding, setActiveBuilding] = useState('');
@@ -114,6 +148,9 @@ export default function MarkupDwgPage() {
   const [activeGroup, setActiveGroup] = useState('');
   const [showGroupModal, setShowGroupModal] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [uploadPageName, setUploadPageName] = useState('');
+  const [uploadFile, setUploadFile] = useState(null);
 
   const currentMarkup = useMemo(() => {
     if (!selectedProject) return null;
@@ -145,7 +182,9 @@ export default function MarkupDwgPage() {
 
   useEffect(() => {
     if (!isEditMode) {
-      setDraftPages(currentGroup?.pages || []);
+      setDraftPages(sortPagesByOrder(currentGroup?.pages || []));
+      setDraftSourceFileName(currentGroup?.sourceFileName || '');
+      setDraftSourcePdfUrl(currentGroup?.sourcePdfUrl || '');
     }
   }, [currentMarkup, isEditMode, activeGroup, currentGroup]);
 
@@ -353,75 +392,119 @@ export default function MarkupDwgPage() {
 
       pages.push({
         id: createId(),
-        name: `${pdfFile.name} - Page ${i}`,
+        name: buildPageName(uploadPageName, pdfFile.name, i, pdf.numPages),
         url: imageUrl,
         order: i - 1,
+        createdAt: new Date().toISOString(),
       });
     }
 
     return pages;
   }
 
-  async function handlePdfUpload(file) {
-    if (!file || !selectedProject || !activeBuilding || !activeGroup) return;
+  async function convertImageToPage(file) {
+    if (!selectedProject || !activeBuilding || !activeGroup) return [];
 
-    try {
-      setBusyLabel('Uploading original PDF');
-      setBusyProgress(0);
+    setBusyLabel('Uploading page image');
+    setBusyProgress(0);
 
-      const pdfPath = `markup-dwg/${selectedProject.id}/buildings/${activeBuilding}/groups/${activeGroup}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9-_.]/g, '-')}`;
-      const pdfUrl = await uploadBlob(file, pdfPath, setBusyProgress);
+    const ext = getFileExtension(file.name, 'png');
+    const safeName = getBaseFileName(file.name).replace(/[^a-zA-Z0-9-_]/g, '-');
+    const imagePath = `markup-dwg/${selectedProject.id}/buildings/${activeBuilding}/groups/${activeGroup}/manual/${safeName}-${Date.now()}.${ext}`;
+    const imageUrl = await uploadBlob(file, imagePath, setBusyProgress);
 
-      const pages = await convertPdfToPages(file);
-      
-      const updatedBuildings = buildings.map(b => {
-        if (b.id === activeBuilding) {
-          return {
-            ...b,
-            groups: b.groups.map(g => {
-              if (g.id === activeGroup) {
-                return { ...g, sourceFileName: file.name, sourcePdfUrl: pdfUrl, pages };
-              }
-              return g;
-            })
-          };
-        }
-        return b;
-      });
-
-      await saveMarkupRecord({
-        buildings: updatedBuildings,
-      });
-
-      setDraftPages(pages);
-      setIsEditMode(false);
-    } catch (error) {
-      console.error('Failed to upload PDF:', error);
-      alert('Failed to upload and convert PDF.');
-    } finally {
-      setBusyLabel('');
-      setBusyProgress(0);
-      if (pdfInputRef.current) pdfInputRef.current.value = '';
-    }
+    return [
+      {
+        id: createId(),
+        name: buildPageName(uploadPageName, file.name, 1, 1),
+        url: imageUrl,
+        order: 0,
+        createdAt: new Date().toISOString(),
+      },
+    ];
   }
 
-  async function handleAddPdf(file) {
-    if (!file) return;
+  async function createPagesFromFile(file) {
+    if (!file) return [];
+    if (isPdfFile(file)) {
+      return convertPdfToPages(file);
+    }
+    return convertImageToPage(file);
+  }
+
+  function prependPages(existingPages, newPages) {
+    return [...newPages, ...sortPagesByOrder(existingPages)].map((page, index) => ({
+      ...page,
+      order: index,
+    }));
+  }
+
+  function openUploadModal() {
+    if (!activeBuilding || !activeGroup || busyLabel) return;
+    setUploadPageName('');
+    setUploadFile(null);
+    setShowUploadModal(true);
+  }
+
+  function closeUploadModal() {
+    setShowUploadModal(false);
+    setUploadPageName('');
+    setUploadFile(null);
+    if (uploadFileInputRef.current) uploadFileInputRef.current.value = '';
+  }
+
+  async function handleUploadSubmit() {
+    if (!uploadFile || !selectedProject || !activeBuilding || !activeGroup) return;
 
     try {
-      const convertedPages = await convertPdfToPages(file);
-      const newPages = convertedPages.map((page, index) => ({
-        ...page,
-        order: draftPages.length + index,
-      }));
-      setDraftPages(prev => [...prev, ...newPages]);
+      const file = uploadFile;
+      const isPdfUpload = isPdfFile(file);
+      let uploadedFileUrl = '';
+
+      if (isPdfUpload) {
+        setBusyLabel('Uploading original PDF');
+        setBusyProgress(0);
+
+        const pdfPath = `markup-dwg/${selectedProject.id}/buildings/${activeBuilding}/groups/${activeGroup}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9-_.]/g, '-')}`;
+        uploadedFileUrl = await uploadBlob(file, pdfPath, setBusyProgress);
+      }
+
+      const newPages = await createPagesFromFile(file);
+
+      if (isEditMode) {
+        setDraftPages(prev => prependPages(prev, newPages));
+        setDraftSourceFileName(file.name);
+        setDraftSourcePdfUrl(isPdfUpload ? uploadedFileUrl : '');
+      } else {
+        const updatedBuildings = buildings.map((building) => {
+          if (building.id !== activeBuilding) return building;
+          return {
+            ...building,
+            groups: building.groups.map((group) => {
+              if (group.id !== activeGroup) return group;
+              return {
+                ...group,
+                sourceFileName: file.name,
+                sourcePdfUrl: isPdfUpload ? uploadedFileUrl : '',
+                pages: prependPages(group.pages || [], newPages),
+                updatedAt: new Date().toISOString(),
+              };
+            }),
+          };
+        });
+
+        await saveMarkupRecord({
+          buildings: updatedBuildings,
+        });
+      }
+
+      closeUploadModal();
     } catch (error) {
-      console.error('Failed to add PDF pages:', error);
-      alert('Failed to add PDF.');
+      console.error('Failed to upload markup file:', error);
+      alert('Failed to upload and create markup pages.');
     } finally {
       setBusyLabel('');
       setBusyProgress(0);
-      if (addPdfInputRef.current) addPdfInputRef.current.value = '';
     }
   }
 
@@ -453,12 +536,16 @@ export default function MarkupDwgPage() {
   }
 
   function beginEdit() {
-    setDraftPages(currentGroup?.pages || []);
+    setDraftPages(sortPagesByOrder(currentGroup?.pages || []));
+    setDraftSourceFileName(currentGroup?.sourceFileName || '');
+    setDraftSourcePdfUrl(currentGroup?.sourcePdfUrl || '');
     setIsEditMode(true);
   }
 
   function cancelEdit() {
-    setDraftPages(currentGroup?.pages || []);
+    setDraftPages(sortPagesByOrder(currentGroup?.pages || []));
+    setDraftSourceFileName(currentGroup?.sourceFileName || '');
+    setDraftSourcePdfUrl(currentGroup?.sourcePdfUrl || '');
     setIsEditMode(false);
   }
 
@@ -491,8 +578,8 @@ export default function MarkupDwgPage() {
               if (g.id === activeGroup) {
                 return {
                   ...g,
-                  sourceFileName: currentGroup?.sourceFileName || 'Markup Pages',
-                  sourcePdfUrl: currentGroup?.sourcePdfUrl || '',
+                  sourceFileName: draftSourceFileName || currentGroup?.sourceFileName || 'Markup Pages',
+                  sourcePdfUrl: draftSourcePdfUrl || '',
                   pages: draftPages.map((page, index) => ({
                     ...page,
                     order: index,
@@ -520,7 +607,7 @@ export default function MarkupDwgPage() {
     }
   }
 
-  const visiblePages = isEditMode ? draftPages : (currentGroup?.pages || []);
+  const visiblePages = sortPagesByOrder(isEditMode ? draftPages : (currentGroup?.pages || []));
 
   function zoomOut() {
     setZoom(prev => Math.max(0, prev - 10));
@@ -537,10 +624,10 @@ export default function MarkupDwgPage() {
           <div className="min-w-0">
             <div className="flex items-center gap-3">
               <h1 className="text-lg font-bold text-slate-800">Markup RFI</h1>
-              {currentGroup?.sourceFileName && (
+              {(isEditMode ? draftSourceFileName : currentGroup?.sourceFileName) && (
                 <div className="flex items-center gap-2 text-sm text-slate-600">
                   <FileText size={16} />
-                  <span className="truncate">{currentGroup.sourceFileName}</span>
+                  <span className="truncate">{isEditMode ? draftSourceFileName : currentGroup?.sourceFileName}</span>
                 </div>
               )}
             </div>
@@ -583,12 +670,12 @@ export default function MarkupDwgPage() {
 
             <button
               type="button"
-              onClick={() => pdfInputRef.current?.click()}
+              onClick={openUploadModal}
               disabled={!!busyLabel || !activeBuilding || !activeGroup}
               className="inline-flex items-center gap-2 rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-orange-600 disabled:opacity-50"
             >
               {busyLabel ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
-              {currentGroup?.pages?.length ? 'Replace PDF' : 'Upload PDF'}
+              {currentGroup?.pages?.length ? 'Add File' : 'Upload File'}
             </button>
 
             {!!currentGroup && !isEditMode && canEdit && (
@@ -606,12 +693,12 @@ export default function MarkupDwgPage() {
               <>
                 <button
                   type="button"
-                  onClick={() => addPdfInputRef.current?.click()}
+                  onClick={openUploadModal}
                   disabled={!!busyLabel}
                   className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
                 >
                   <FileText size={16} />
-                  Add PDF
+                  Add File
                 </button>
                 <button
                   type="button"
@@ -653,26 +740,6 @@ export default function MarkupDwgPage() {
         )}
 
         <input
-          ref={pdfInputRef}
-          type="file"
-          accept=".pdf"
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) handlePdfUpload(file);
-          }}
-          className="hidden"
-        />
-        <input
-          ref={addPdfInputRef}
-          type="file"
-          accept=".pdf"
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) handleAddPdf(file);
-          }}
-          className="hidden"
-        />
-        <input
           ref={replaceImageInputRef}
           type="file"
           accept=".jpg,.jpeg,.png,.webp"
@@ -683,6 +750,78 @@ export default function MarkupDwgPage() {
           className="hidden"
         />
       </div>
+
+      {/* Building Modal */}
+      {showUploadModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={closeUploadModal} />
+          <div className="relative w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-orange-100">
+                <Upload size={18} className="text-orange-600" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-800">Upload file to folder</h3>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  Set a page name first, then upload PDF or image to add new pages on top of this folder.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-5 space-y-4">
+              <div>
+                <label className="mb-2 block text-xs font-semibold text-slate-600">Page Name</label>
+                <input
+                  type="text"
+                  value={uploadPageName}
+                  onChange={(e) => setUploadPageName(e.target.value)}
+                  placeholder="e.g. Pile Cut Off Update 16.05.2026"
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+                  autoFocus
+                />
+              </div>
+
+              <div>
+                <label className="mb-2 block text-xs font-semibold text-slate-600">File</label>
+                <input
+                  ref={uploadFileInputRef}
+                  type="file"
+                  accept=".pdf,.jpg,.jpeg,.png,.webp"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0] || null;
+                    setUploadFile(file);
+                    if (file && !uploadPageName.trim()) {
+                      setUploadPageName(getBaseFileName(file.name));
+                    }
+                  }}
+                  className="block w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-orange-50 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-orange-600 hover:file:bg-orange-100"
+                />
+                <p className="mt-2 text-xs text-slate-500">
+                  Supports PDF, JPG, PNG and WEBP. New pages will always be placed above older pages.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-5 flex gap-3">
+              <button
+                type="button"
+                onClick={closeUploadModal}
+                className="flex-1 rounded-lg bg-slate-100 px-4 py-2 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-200"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleUploadSubmit}
+                disabled={!uploadFile || !uploadPageName.trim() || !!busyLabel}
+                className="flex-1 rounded-lg bg-orange-500 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Upload
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Building Modal */}
       {showBuildingModal && (
@@ -960,19 +1099,17 @@ export default function MarkupDwgPage() {
               </p>
               <button
                 type="button"
-                onClick={() => pdfInputRef.current?.click()}
+                onClick={openUploadModal}
                 className="mt-5 inline-flex items-center gap-2 rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-orange-600"
               >
                 <Upload size={16} />
-                Upload PDF
+                Upload File
               </button>
             </div>
           </div>
         ) : (
           <div className="flex w-full flex-col gap-5">
             {visiblePages
-              .slice()
-              .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
               .map((page, index, pages) => (
                 <PageCard
                   key={page.id}

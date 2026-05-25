@@ -19,6 +19,7 @@ import PunchListPage     from './components/punchlist/PunchListPage';
 import HandoverPage      from './components/handover/HandoverPage';
 import FinalPackagePage  from './components/finalpackage/FinalPackagePage';
 import MarkupDwgPage     from './components/markupdwg/MarkupDwgPage';
+import ExtractPdfPage    from './components/extractpdf/ExtractPdfPage';
 import ComingSoon        from './components/common/ComingSoon';
 import UserManagementPanel from './pages/admin/UserManagementPanel';
 
@@ -51,6 +52,7 @@ function MainApp() {
     if (activePage === 'final-package') return <FinalPackagePage />;
     if (activePage === 'markup-dwg')   return <MarkupDwgPage />;
     if (activePage === 'markup-tag-id') return <ComingSoon title="Markup Tag ID" />;
+    if (activePage === 'extract-pdf')  return <ExtractPdfPage />;
     if (activePage === 'admin-users')  return <UserManagementPanel />;
     return <ComingSoon title={MODULE_TITLES[activePage] || activePage} />;
   }

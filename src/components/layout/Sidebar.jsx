@@ -3,7 +3,7 @@ import {
   LayoutDashboard, FolderOpen, FileText, ClipboardList,
   AlertTriangle, PackageCheck, ListChecks, Handshake,
   Archive, ChevronDown, ChevronRight, Users, ShieldCheck,
-  PencilRuler,
+  PencilRuler, FileScan,
 } from 'lucide-react';
 import { collection, doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../config/firebase';
@@ -90,6 +90,13 @@ const NAV_ITEMS = [
       },
     ],
   },
+  {
+    id: 'extract-pdf',
+    label: 'Extract PDF',
+    icon: FileScan,
+    roles: ['MasterAdmin', 'SuperAdmin', 'Admin', 'MD', 'CD', 'PM', 'QcDocCenter', 'SiteQcInspector'],
+    alwaysVisible: true,  // ไม่ขึ้นกับ rolePermissions ใน Firestore
+  },
   // admin-users ถูกควบคุมเพิ่มเติมด้านล่าง (MasterAdmin เท่านั้น)
 ];
 
@@ -143,6 +150,10 @@ export default function Sidebar({ activePage, setActivePage }) {
 
   const visibleItems = NAV_ITEMS.filter(item => {
     if (!userProfile) return false;
+    // เมนูที่ตั้ง alwaysVisible จะแสดงเสมอ ไม่ขึ้นกับ rolePermissions
+    if (item.alwaysVisible) {
+      return isAdmin || item.roles.some(r => userRoles.includes(r));
+    }
     if (item.children?.length) {
       return item.children.some(child => hasReadPermission(child.id, ['markup-dwg']));
     }

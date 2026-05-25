@@ -150,4 +150,5 @@ export const categories = {
   handover:     'handover',
   finalPackage: 'finalPackage',
   markupDwg:    'markupDwg',
+  extractPdf:   'extractPdf',
 };

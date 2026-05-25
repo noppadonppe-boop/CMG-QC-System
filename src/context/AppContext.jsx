@@ -30,6 +30,7 @@ export function AppProvider({ children }) {
   const [handover,     setHandover]     = useState([]);
   const [finalPackage, setFinalPackage] = useState([]);
   const [markupDwgItems, setMarkupDwgItems] = useState([]);
+  const [extractPdfItems, setExtractPdfItems] = useState([]);
 
   // Admin roles see every project; others only see their assigned projects
   const isAdmin = useMemo(
@@ -56,7 +57,7 @@ export function AppProvider({ children }) {
 
     setFirestoreError(null);
     let resolved = 0;
-    const total  = 10;
+    const total  = 11;
 
     function onLoad() {
       resolved++;
@@ -76,6 +77,7 @@ export function AppProvider({ children }) {
       subscribeCategory(categories.handover,     d => { setHandover(d);     onLoad(); }),
       subscribeCategory(categories.finalPackage, d => { setFinalPackage(d); onLoad(); }),
       subscribeCategory(categories.markupDwg,    d => { setMarkupDwgItems(d); onLoad(); }),
+      subscribeCategory(categories.extractPdf,   d => { setExtractPdfItems(d); onLoad(); }),
     ];
 
     return () => unsubs.forEach(u => u());
@@ -173,6 +175,11 @@ export function AppProvider({ children }) {
   const updateMarkupDwg = (id, c, lu) => updateItemPersist(setMarkupDwgItems, categories.markupDwg, id, c, lu);
   const deleteMarkupDwg = id      => deleteItemPersist(setMarkupDwgItems, categories.markupDwg, id);
 
+  // ── Extract PDF ─────────────────────────────────────────────────────────────
+  const addExtractPdf    = item    => addItemPersist(setExtractPdfItems, categories.extractPdf, item);
+  const updateExtractPdf = (id, c, lu) => updateItemPersist(setExtractPdfItems, categories.extractPdf, id, c, lu);
+  const deleteExtractPdf = id      => deleteItemPersist(setExtractPdfItems, categories.extractPdf, id);
+
   const value = {
     selectedProjectId, setSelectedProjectId,
     selectedProject,
@@ -190,6 +197,7 @@ export function AppProvider({ children }) {
     handover,     addHandover,    updateHandover,    deleteHandover,
     finalPackage, addFinalPackage, updateFinalPackage, deleteFinalPackage,
     markupDwgItems, addMarkupDwg, updateMarkupDwg, deleteMarkupDwg,
+    extractPdfItems, addExtractPdf, updateExtractPdf, deleteExtractPdf,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

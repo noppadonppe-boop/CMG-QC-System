@@ -21,7 +21,7 @@ import RfiStage4Modal from './RfiStage4Modal';
 import RfiDetailModal from './RfiDetailModal';
 import TableColumnVisibility from '../common/TableColumnVisibility';
 
-// ── Stage config ───────────────────────────────────────────────────────────────
+// โ”€โ”€ Stage config โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€
 const STAGES = [
   {
     id: 1,
@@ -124,8 +124,8 @@ const RFI_TABLE_COLUMNS = [
   { key: 'stage4Progress', label: 'Stage 4 Progress', defaultHidden: true },
   { key: 'statusInsp', label: 'Status Insp.' },
   { key: 'statusDoc', label: 'Status Doc' },
-  { key: 'test7', label: 'ผลเท 7 วัน' },
-  { key: 'test28', label: 'ผลเท 28 วัน' },
+  { key: 'test7', label: '7-Day Test' },
+  { key: 'test28', label: '28-Day Test' },
   { key: 'actions', label: 'Actions', locked: true },
 ];
 
@@ -139,7 +139,8 @@ const TEST_RESULT_MIME = [
   'image/webp',
 ];
 const TEST_RESULT_EXT = '.pdf,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.webp';
-const TEST_RESULT_MAX_MB = null; // ไม่จำกัดขนาดไฟล์
+const TEST_RESULT_MAX_MB = null;
+const EMPTY_VALUE = '-';
 
 function startOfDay(date) {
   const value = new Date(date);
@@ -156,17 +157,31 @@ function addDays(dateString, days) {
 }
 
 function formatDate(date) {
-  if (!date) return '—';
+  if (!date) return EMPTY_VALUE;
   return date.toISOString().slice(0, 10);
 }
 
+function getUserDisplayName(user) {
+  const fullName = [user?.firstName, user?.lastName].filter(Boolean).join(' ').trim();
+  if (fullName) return fullName;
+  const email = (user?.email || '').trim();
+  if (!email) return '';
+  return email.includes('@') ? email.split('@')[0] : email;
+}
+
+function isConcreteTestSkipped(rfi) {
+  return !!(rfi?.concreteTestSkip || rfi?.status7Day === 'Skipped' || rfi?.status28Day === 'Skipped');
+}
+
 function getConcreteTestAlerts(rfi) {
+  const isSkipped = isConcreteTestSkipped(rfi);
   if (!rfi.concretePourDate) {
     return {
       due7Date: null,
       due28Date: null,
       is7Due: false,
       is28Due: false,
+      isSkipped,
       is7Uploaded: Array.isArray(rfi.test7DayFiles) && rfi.test7DayFiles.length > 0,
       is28Uploaded: Array.isArray(rfi.test28DayFiles) && rfi.test28DayFiles.length > 0,
       hasPendingAlert: false,
@@ -177,17 +192,58 @@ function getConcreteTestAlerts(rfi) {
   const due28Date = addDays(rfi.concretePourDate, 28);
   const is7Uploaded = Array.isArray(rfi.test7DayFiles) && rfi.test7DayFiles.length > 0;
   const is28Uploaded = Array.isArray(rfi.test28DayFiles) && rfi.test28DayFiles.length > 0;
-  const is7Due = !!due7Date && due7Date <= today && !is7Uploaded;
-  const is28Due = !!due28Date && due28Date <= today && !is28Uploaded;
+  const is7Due = !isSkipped && !!due7Date && due7Date <= today && !is7Uploaded;
+  const is28Due = !isSkipped && !!due28Date && due28Date <= today && !is28Uploaded;
   return {
     due7Date,
     due28Date,
     is7Due,
     is28Due,
+    isSkipped,
     is7Uploaded,
     is28Uploaded,
     hasPendingAlert: is7Due || is28Due,
   };
+}
+
+function getStage4CompletedSteps(rfi) {
+  return [
+    Array.isArray(rfi.stage4ClientSignFiles) && rfi.stage4ClientSignFiles.length > 0,
+    Array.isArray(rfi.stage4CompleteFiles) && rfi.stage4CompleteFiles.length > 0,
+    Array.isArray(rfi.stage4OwnerSignFiles) && rfi.stage4OwnerSignFiles.length > 0,
+  ].filter(Boolean).length;
+}
+
+function getStage4ProgressPercent(rfi) {
+  return Math.round((getStage4CompletedSteps(rfi) / 3) * 100);
+}
+
+function getDateValue(value) {
+  if (!value) return null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  if (typeof value?.toDate === 'function') {
+    const parsed = value.toDate();
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function shouldShowStage3Reject(rfi) {
+  if (rfi.stage !== 3 || rfi.result !== 'Reject') return true;
+  const rejectAt = getDateValue(rfi.stage3RejectAt || rfi.updatedAt);
+  if (!rejectAt) return true;
+  const threeDaysInMs = 3 * 24 * 60 * 60 * 1000;
+  return Date.now() - rejectAt.getTime() < threeDaysInMs;
+}
+
+function sortStageRfis(stageId, rfis) {
+  if (stageId !== 4) return rfis;
+  return [...rfis].sort((a, b) => {
+    const aHasAlert = getConcreteTestAlerts(a).hasPendingAlert ? 1 : 0;
+    const bHasAlert = getConcreteTestAlerts(b).hasPendingAlert ? 1 : 0;
+    return bHasAlert - aHasAlert;
+  });
 }
 
 function getRfiFieldValue(rfi, key) {
@@ -218,7 +274,7 @@ function getRfiFieldValue(rfi, key) {
   }
 }
 
-// ── Per-Column Filter Dropdown ─────────────────────────────────────────────────
+// โ”€โ”€ Per-Column Filter Dropdown โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€
 function ColumnFilterDropdown({ colKey, label, allDocs, activeValues, onChange }) {
   const [open, setOpen]     = useState(false);
   const [search, setSearch] = useState('');
@@ -276,7 +332,7 @@ function ColumnFilterDropdown({ colKey, label, allDocs, activeValues, onChange }
             <div className="px-2 pt-2">
               <input
                 className="w-full text-[10px] px-2 py-1 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-orange-400"
-                placeholder="Search…"
+                placeholder="Search..."
                 value={search}
                 onChange={e => setSearch(e.target.value)}
               />
@@ -320,7 +376,7 @@ function ColumnFilterDropdown({ colKey, label, allDocs, activeValues, onChange }
   );
 }
 
-// ── Confirm Delete modal ──────────────────────────────────────────────────────
+// โ”€โ”€ Confirm Delete modal โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€
 function ConfirmDeleteRfi({ rfi, onConfirm, onCancel }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -338,7 +394,7 @@ function ConfirmDeleteRfi({ rfi, onConfirm, onCancel }) {
         <div className="bg-slate-50 rounded-xl px-4 py-3 space-y-1">
           <div className="text-xs font-bold text-slate-700 font-mono">{rfi.rfiNo}</div>
           <div className="text-[11px] text-slate-500">{rfi.typeOfInspection}</div>
-          <div className="text-[10px] text-slate-400">{rfi.area} · {rfi.location}</div>
+          <div className="text-[10px] text-slate-400">{rfi.area} - {rfi.location}</div>
         </div>
         <div className="flex gap-3">
           <button onClick={onCancel} className="flex-1 px-4 py-2 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">Cancel</button>
@@ -349,16 +405,37 @@ function ConfirmDeleteRfi({ rfi, onConfirm, onCancel }) {
   );
 }
 
-function TestResultUploadCell({ label, dueDate, isDue, files, uploading, onUploadClick, inputRef, onFileChange }) {
+function TestResultUploadCell({
+  label,
+  dueDate,
+  isDue,
+  isSkipped = false,
+  files,
+  uploading,
+  canSkip = false,
+  skipping = false,
+  onUploadClick,
+  onSkip,
+  inputRef,
+  onFileChange,
+}) {
   const hasFiles = Array.isArray(files) && files.length > 0;
-  const showUploadButton = isDue && !hasFiles;
+  const showUploadButton = isDue && !hasFiles && !isSkipped;
 
   return (
     <div className={`inline-flex max-w-full items-center gap-2 rounded-md border px-2 py-1 ${
-      isDue ? 'border-red-300 bg-red-50' : 'border-slate-200 bg-white'
+      isSkipped ? 'border-amber-300 bg-amber-50' :
+      isDue ? 'border-red-300 bg-red-50' :
+      'border-slate-200 bg-white'
     }`}>
-      <span className="text-[10px] font-semibold text-slate-600 whitespace-nowrap">{label}</span>
-      <span className={`text-[10px] whitespace-nowrap ${isDue ? 'text-red-700 font-semibold' : 'text-slate-500'}`}>
+      <span className={`text-[10px] font-semibold whitespace-nowrap ${
+        isSkipped ? 'text-amber-700' : 'text-slate-600'
+      }`}>{label}</span>
+      <span className={`text-[10px] whitespace-nowrap ${
+        isSkipped ? 'text-amber-700 font-semibold' :
+        isDue ? 'text-red-700 font-semibold' :
+        'text-slate-500'
+      }`}>
         Due: {formatDate(dueDate)}
       </span>
       {hasFiles ? (
@@ -371,20 +448,37 @@ function TestResultUploadCell({ label, dueDate, isDue, files, uploading, onUploa
         >
           <span className="truncate max-w-[88px]">{files[0].name}</span>
         </a>
+      ) : isSkipped ? (
+        <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700 whitespace-nowrap">
+          Not required
+        </span>
       ) : showUploadButton ? (
-        <button
-          type="button"
-          onClick={onUploadClick}
-          disabled={uploading}
-          className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold transition-colors whitespace-nowrap ${
-            isDue
-              ? 'bg-red-100 text-red-700 hover:bg-red-200'
-              : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-          } disabled:opacity-60`}
-        >
-          {uploading ? <Loader2 size={10} className="animate-spin" /> : <Upload size={10} />}
-          {uploading ? 'Uploading...' : 'Upload'}
-        </button>
+        <div className="inline-flex items-center gap-1">
+          <button
+            type="button"
+            onClick={onUploadClick}
+            disabled={uploading || skipping}
+            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold transition-colors whitespace-nowrap ${
+              isDue
+                ? 'bg-red-100 text-red-700 hover:bg-red-200'
+                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+            } disabled:opacity-60`}
+          >
+            {uploading ? <Loader2 size={10} className="animate-spin" /> : <Upload size={10} />}
+            {uploading ? 'Uploading...' : 'Upload'}
+          </button>
+          {canSkip && (
+            <button
+              type="button"
+              onClick={onSkip}
+              disabled={uploading || skipping}
+              className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700 transition-colors hover:bg-amber-200 whitespace-nowrap disabled:opacity-60"
+            >
+              {skipping ? <Loader2 size={10} className="animate-spin" /> : null}
+              {skipping ? 'Skipping...' : 'Skip'}
+            </button>
+          )}
+        </div>
       ) : (
         <span className="text-[10px] text-slate-400 whitespace-nowrap">Waiting</span>
       )}
@@ -400,25 +494,24 @@ function TestResultUploadCell({ label, dueDate, isDue, files, uploading, onUploa
   );
 }
 
-// ── Per-stage action label config ──────────────────────────────────────────────
+// โ”€โ”€ Per-stage action label config โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€
 const STAGE_ADVANCE = {
-  1: { label: 'Issue →',    color: 'bg-blue-600'   },
-  2: { label: 'Inspect →',  color: 'bg-purple-600' },
-  3: { label: 'Complete →', color: 'bg-green-600'  },
+  1: { label: 'Issue ->',    color: 'bg-blue-600'   },
+  2: { label: 'Inspect ->',  color: 'bg-purple-600' },
+  3: { label: 'Complete ->', color: 'bg-green-600'  },
 };
 
-// ── RFI Kanban Card ────────────────────────────────────────────────────────────
+// โ”€โ”€ RFI Kanban Card โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€
 function RfiCard({ rfi, stage, canAdvance, canEdit, canDelete, onView, onEdit, onAdvance, onDelete }) {
   const isCurrentStage = rfi.stage === stage.id;
   const isDone         = rfi.stage > stage.id;
   const isOverdue      = rfi.dueDate && rfi.stage < 4 && new Date(rfi.dueDate) < new Date();
   const concreteAlerts = getConcreteTestAlerts(rfi);
-  const stage4CompletedSteps = [
-    Array.isArray(rfi.stage4ClientSignFiles) && rfi.stage4ClientSignFiles.length > 0,
-    Array.isArray(rfi.stage4CompleteFiles) && rfi.stage4CompleteFiles.length > 0,
-    Array.isArray(rfi.stage4OwnerSignFiles) && rfi.stage4OwnerSignFiles.length > 0,
-  ].filter(Boolean).length;
-  const stage4ProgressPercent = Math.round((stage4CompletedSteps / 3) * 100);
+  const stage4CompletedSteps = getStage4CompletedSteps(rfi);
+  const stage4ProgressPercent = getStage4ProgressPercent(rfi);
+  const cardInspectionLabel = stage.id === 2
+    ? (rfi.structureType || rfi.typeOfInspection)
+    : rfi.typeOfInspection;
 
   const result = stage.id === 1 ? rfi.statusInsp
                : stage.id === 3 ? rfi.result
@@ -431,7 +524,7 @@ function RfiCard({ rfi, stage, canAdvance, canEdit, canDelete, onView, onEdit, o
     ? [
         rfi.inspectionScheduleDate ? `${rfi.inspectionScheduleDate}${rfi.inspectionScheduleTime ? ' ' + rfi.inspectionScheduleTime : ''}` : null,
         rfi.stage2EmailStatus === 'ok' ? 'Send Email OK' : null,
-      ].filter(Boolean).join(' · ')
+      ].filter(Boolean).join(' - ')
     : null;
 
   return (
@@ -446,9 +539,9 @@ function RfiCard({ rfi, stage, canAdvance, canEdit, canDelete, onView, onEdit, o
       <div className="flex items-center justify-between gap-1.5 mb-1">
         <div className="flex items-center gap-1.5 min-w-0">
           <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${stage.badge}`}>S{rfi.stage}</span>
-          <span className="text-[11px] font-bold text-slate-800 font-mono truncate">{rfi.requestNo}</span>
+          <span className="text-[11px] font-bold text-slate-800 font-mono truncate">{rfi.rfiNo && rfi.rfiNo !== '-' ? rfi.rfiNo : rfi.requestNo}</span>
           {rfi.rfiNo && rfi.rfiNo !== '-' && (
-            <span className="text-[10px] text-slate-500 truncate">— {rfi.rfiNo}</span>
+            <span className="text-[10px] text-slate-500 truncate">{rfi.requestNo}</span>
           )}
         </div>
         <div className="flex items-center gap-1 shrink-0">
@@ -459,11 +552,11 @@ function RfiCard({ rfi, stage, canAdvance, canEdit, canDelete, onView, onEdit, o
         </div>
       </div>
 
-      {/* Type of inspection */}
-      <div className="text-[10px] font-semibold text-slate-700 truncate mb-0.5">{rfi.typeOfInspection}</div>
+      {/* Primary inspection label */}
+      <div className="text-[10px] font-semibold text-slate-700 truncate mb-0.5">{cardInspectionLabel}</div>
 
-      {/* Area · Location */}
-      <div className="text-[9px] text-slate-400 truncate mb-1">{rfi.area} · {rfi.location}</div>
+      {/* Area - Location */}
+      <div className="text-[9px] text-slate-400 truncate mb-1">{rfi.area} - {rfi.location}</div>
 
       {/* Stage-specific chips */}
       {stage2Line && (
@@ -479,7 +572,7 @@ function RfiCard({ rfi, stage, canAdvance, canEdit, canDelete, onView, onEdit, o
           rfi.stage4Status === 'Close' ? 'bg-green-100 text-green-700' :
           rfi.stage4Status === 'Complete document' ? 'bg-blue-100 text-blue-700' :
           'bg-amber-100 text-amber-700'}`}>
-          🔒 {rfi.stage4Status}
+          {rfi.stage4Status}
         </div>
       )}
       {stage.id === 4 && (
@@ -543,7 +636,7 @@ function RfiCard({ rfi, stage, canAdvance, canEdit, canDelete, onView, onEdit, o
         )}
       </div>
 
-      {/* Due date + overdue — bottom row */}
+      {/* Due date + overdue โ€” bottom row */}
       {rfi.dueDate && (
         <div className={`flex items-center gap-1 mt-1 text-[9px] ${isOverdue ? 'text-red-500 font-semibold' : 'text-slate-400'}`}>
           <Clock size={8} /> {rfi.dueDate}
@@ -554,9 +647,14 @@ function RfiCard({ rfi, stage, canAdvance, canEdit, canDelete, onView, onEdit, o
   );
 }
 
-// ── Kanban Column ─────────────────────────────────────────────────────────────
+// โ”€โ”€ Kanban Column โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€
 function KanbanColumn({ stage, rfis, getCardPerms, onView, onEdit, onAdvance, onDelete }) {
-  const stageRfis = rfis.filter(r => r.stage === stage.id);
+  const stageRfis = sortStageRfis(stage.id, rfis.filter(r => {
+    if (r.stage !== stage.id) return false;
+    if (stage.id === 3 && !shouldShowStage3Reject(r)) return false;
+    if (stage.id === 4 && getStage4ProgressPercent(r) === 100) return false;
+    return true;
+  }));
   const Icon = stage.icon;
 
   return (
@@ -603,8 +701,8 @@ function KanbanColumn({ stage, rfis, getCardPerms, onView, onEdit, onAdvance, on
   );
 }
 
-// ── Main Page ─────────────────────────────────────────────────────────────────
-// ── CSV Export Function ───────────────────────────────────────────────────────
+// โ”€โ”€ Main Page โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€
+// โ”€โ”€ CSV Export Function โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€
 function exportToCSV(data, filename) {
   // Convert data to CSV format
   const headers = Object.keys(data[0] || {});
@@ -648,6 +746,9 @@ export default function RfiPage() {
   const canEditRfiStage3    = canAction('rfi', 'editRfiStage3');
   const canEditRfiStage4    = canAction('rfi', 'editRfiStage4');
   const canDeleteRfi        = canAction('rfi', 'deleteRfi');
+  const canSkipConcreteTests = Array.isArray(userProfile?.role)
+    ? userProfile.role.includes('QcDocCenter') || userProfile.role.includes('MasterAdmin')
+    : userProfile?.role === 'QcDocCenter' || userProfile?.role === 'MasterAdmin';
 
   function canAdvanceForRfi(rfi) {
     const stage = rfi.stage;
@@ -665,7 +766,7 @@ export default function RfiPage() {
     return false;
   }
 
-  // Per-card permission resolver — ใช้ Set Role เป็นหลัก
+  // Per-card permission resolver โ€” เนเธเน Set Role เน€เธเนเธเธซเธฅเธฑเธ
   function getCardPerms(rfi) {
     const s = rfi.stage;
     // Hide Edit and Delete buttons for Stage 4 RFI with status "RFI Closed"
@@ -697,6 +798,7 @@ export default function RfiPage() {
   const [deleteTarget,  setDeleteTarget] = useState(null);
   const uploadInputRefs = useRef({});
   const [uploadingTests, setUploadingTests] = useState({});
+  const [skippingConcreteTests, setSkippingConcreteTests] = useState({});
 
   const projectRfis = rfiItems.filter(r => r.projectId === selectedProjectId);
 
@@ -722,7 +824,7 @@ export default function RfiPage() {
 
   const types = [...new Set(projectRfis.map(r => r.typeOfInspection))];
 
-  // ── Handlers ──────────────────────────────────────────────────────────────
+  // โ”€โ”€ Handlers โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€
   function handleCreateStage1(form) {
     const newRfi = {
       ...form,
@@ -736,6 +838,8 @@ export default function RfiPage() {
       inspectionDate: '', result: '', stage3Note: '', stage3Attachment: '',
       stage4Result: '', stage4Note: '', stage4Status: '', stage4Attachment: '',
       test7DayFiles: [], test28DayFiles: [],
+      status7Day: 'Pending', status28Day: 'Pending',
+      concreteTestSkip: false, concreteTestSkipAt: '', concreteTestSkipBy: '',
     };
     addRfi(newRfi);
     setStage1Modal(false);
@@ -746,7 +850,7 @@ export default function RfiPage() {
     setEditTarget(null);
   }
 
-  // Advance button dispatcher — opens the correct modal for the next stage
+  // Advance button dispatcher โ€” opens the correct modal for the next stage
   function handleAdvance(rfi) {
     if (!canAdvanceForRfi(rfi)) return;
     if (rfi.stage === 1) { setStage2Modal(rfi); return; }
@@ -767,6 +871,7 @@ export default function RfiPage() {
   }
 
   function handleSaveStage3(form) {
+    const stage3RejectAt = form.result === 'Reject' ? new Date().toISOString() : '';
     // Check if result is 'Comment' - if so, move back to Stage 2 and reset email status
     if (form.result === 'Comment') {
       updateRfi(stage3Modal.id, {
@@ -774,6 +879,7 @@ export default function RfiPage() {
         stage: 2, // Move back to Stage 2
         statusInsp: form.result,
         stage2EmailStatus: '', // Reset email status to allow sending new Issue email
+        stage3RejectAt: '',
       });
     } else {
       // Normal flow - advance to stage 3
@@ -781,6 +887,7 @@ export default function RfiPage() {
         ...form,
         stage: 3,
         statusInsp: form.result,
+        stage3RejectAt,
       });
     }
     setStage3Modal(null);
@@ -864,10 +971,9 @@ export default function RfiPage() {
       for (let i = 0; i < fileList.length; i++) {
         const file = fileList[i];
         if (!TEST_RESULT_MIME.includes(file.type)) {
-          window.alert(`ไฟล์ "${file.name}" ไม่รองรับ`);
+          window.alert(`File "${file.name}" is not supported.`);
           continue;
         }
-        // ไม่จำกัดขนาดไฟล์
         const ext = file.name.split('.').pop();
         const seq = existingFiles.length + results.length + 1;
         const path = `rfi-concrete-tests/${rfi.projectId}/${safeReq}/${type}_${String(seq).padStart(2, '0')}.${ext}`;
@@ -883,6 +989,7 @@ export default function RfiPage() {
       updateRfi(rfi.id, {
         [field]: [...existingFiles, ...results],
         [statusField]: 'Uploaded',
+        concreteTestSkip: false,
       });
     } finally {
       setUploadingTests(prev => ({ ...prev, [uploadKey]: false }));
@@ -891,7 +998,27 @@ export default function RfiPage() {
     }
   }
 
-  // ── Stats ──────────────────────────────────────────────────────────────────
+  async function handleSkipConcreteTests(rfi) {
+    if (!canSkipConcreteTests) return;
+    const confirmed = window.confirm('Skip concrete test uploads for both 7-day and 28-day results?');
+    if (!confirmed) return;
+
+    const skipKey = getUploadKey(rfi.id, 'skip-concrete-tests');
+    setSkippingConcreteTests(prev => ({ ...prev, [skipKey]: true }));
+    try {
+      await updateRfi(rfi.id, {
+        concreteTestSkip: true,
+        concreteTestSkipAt: new Date().toISOString(),
+        concreteTestSkipBy: getUserDisplayName(userProfile),
+        status7Day: 'Skipped',
+        status28Day: 'Skipped',
+      });
+    } finally {
+      setSkippingConcreteTests(prev => ({ ...prev, [skipKey]: false }));
+    }
+  }
+
+  // โ”€โ”€ Stats โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€
   const stageCount = [1, 2, 3, 4].map(s => projectRfis.filter(r => r.stage === s).length);
   const totalPass  = projectRfis.filter(r => r.stage4Result === 'Pass' || r.result === 'Pass').length;
 
@@ -902,7 +1029,7 @@ export default function RfiPage() {
         <div>
           <h1 className="text-xl font-bold text-slate-800">RFI Workflow</h1>
           <p className="text-sm text-slate-500 mt-0.5">
-            {selectedProject?.name} — Request for Inspection
+            {selectedProject?.name} - Request for Inspection
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -975,7 +1102,7 @@ export default function RfiPage() {
           <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
             className="text-xs pl-8 pr-3 py-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-orange-400 w-60 text-slate-700 placeholder-slate-400"
-            placeholder="Search RFI no., type, location…"
+            placeholder="Search RFI no., type, location..."
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
@@ -1008,7 +1135,7 @@ export default function RfiPage() {
         <span className="ml-auto text-[11px] text-slate-500">{filtered.length} RFIs</span>
       </div>
 
-      {/* ── KANBAN VIEW ────────────────────────────────────────────────────── */}
+      {/* โ”€โ”€ KANBAN VIEW โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€ */}
       {viewMode === 'kanban' && (
         <div className="grid grid-cols-4 gap-4">
           {STAGES.map(stage => (
@@ -1026,7 +1153,7 @@ export default function RfiPage() {
         </div>
       )}
 
-      {/* ── TABLE VIEW ─────────────────────────────────────────────────────── */}
+      {/* โ”€โ”€ TABLE VIEW โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€ */}
       {viewMode === 'table' && (
         <TableColumnVisibility
           storageKey={`rfi-table-columns:${selectedProjectId || 'all'}`}
@@ -1082,54 +1209,54 @@ export default function RfiPage() {
                       <td className={`px-3 py-0.5 font-mono font-bold whitespace-nowrap text-xs ${concreteAlerts.hasPendingAlert ? 'text-red-800' : 'text-slate-800'}`}>{rfi.rfiNo}</td>
                       <td className={`px-3 py-0.5 font-mono whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.requestNo}</td>
                       <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-700'}`}>{rfi.typeOfInspection}</td>
-                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.tagNo || '—'}</td>
-                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.location || '—'}</td>
-                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.area || '—'}</td>
-                      <td className={`px-3 py-0.5 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.requestDateInternal || '—'}</td>
-                      <td className={`px-3 py-0.5 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.requestTimeInternal || '—'}</td>
-                      <td className={`px-3 py-0.5 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.requestDateOwner || '—'}</td>
-                      <td className={`px-3 py-0.5 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.requestTimeOwner || '—'}</td>
-                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.workingStep || '—'}</td>
-                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.structureType || '—'}</td>
-                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.requestedBy || '—'}</td>
-                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.inspectedBy || '—'}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.tagNo || EMPTY_VALUE}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.location || EMPTY_VALUE}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.area || EMPTY_VALUE}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.requestDateInternal || EMPTY_VALUE}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.requestTimeInternal || EMPTY_VALUE}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.requestDateOwner || EMPTY_VALUE}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.requestTimeOwner || EMPTY_VALUE}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.workingStep || EMPTY_VALUE}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.structureType || EMPTY_VALUE}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.requestedBy || EMPTY_VALUE}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.inspectedBy || EMPTY_VALUE}</td>
                       <td className={`px-3 py-0.5 text-xs min-w-[220px] ${rowTextClass || 'text-slate-600'}`}>
-                        <div className="truncate" title={rfi.detailInspection || '—'}>{rfi.detailInspection || '—'}</div>
+                        <div className="truncate" title={rfi.detailInspection || EMPTY_VALUE}>{rfi.detailInspection || EMPTY_VALUE}</div>
                       </td>
-                      <td className={`px-3 py-0.5 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.dueDate || '—'}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.dueDate || EMPTY_VALUE}</td>
                       <td className="px-3 py-0.5">
                         <span className={`text-[10px] font-bold px-1.5 py-px rounded-full ${stage?.badge}`}>
                           {stage?.label}
                         </span>
                       </td>
-                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.inspectionPackage || '—'}</td>
-                      <td className={`px-3 py-0.5 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.inspectionScheduleDate || '—'}</td>
-                      <td className={`px-3 py-0.5 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.inspectionScheduleTime || '—'}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.inspectionPackage || EMPTY_VALUE}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.inspectionScheduleDate || EMPTY_VALUE}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.inspectionScheduleTime || EMPTY_VALUE}</td>
                       <td className={`px-3 py-0.5 text-xs min-w-[220px] ${rowTextClass || 'text-slate-600'}`}>
-                        <div className="truncate" title={rfi.descriptionOfInspection || '—'}>{rfi.descriptionOfInspection || '—'}</div>
+                        <div className="truncate" title={rfi.descriptionOfInspection || EMPTY_VALUE}>{rfi.descriptionOfInspection || EMPTY_VALUE}</div>
                       </td>
                       <td className={`px-3 py-0.5 text-xs min-w-[200px] ${rowTextClass || 'text-slate-600'}`}>
-                        <div className="truncate" title={rfi.stage2Note || '—'}>{rfi.stage2Note || '—'}</div>
+                        <div className="truncate" title={rfi.stage2Note || EMPTY_VALUE}>{rfi.stage2Note || EMPTY_VALUE}</div>
                       </td>
-                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.stage2EmailStatus || '—'}</td>
-                      <td className={`px-3 py-0.5 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.inspectionDate || '—'}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.stage2EmailStatus || EMPTY_VALUE}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.inspectionDate || EMPTY_VALUE}</td>
                       <td className="px-3 py-0.5">
                         <span className={`text-[10px] font-semibold px-1.5 py-px rounded-full ${RESULT_COLORS[rfi.result] || 'bg-slate-100 text-slate-500'}`}>
-                          {rfi.result || '—'}
+                          {rfi.result || EMPTY_VALUE}
                         </span>
                       </td>
                       <td className={`px-3 py-0.5 text-xs min-w-[200px] ${rowTextClass || 'text-slate-600'}`}>
-                        <div className="truncate" title={rfi.stage3Note || '—'}>{rfi.stage3Note || '—'}</div>
+                        <div className="truncate" title={rfi.stage3Note || EMPTY_VALUE}>{rfi.stage3Note || EMPTY_VALUE}</div>
                       </td>
-                      <td className={`px-3 py-0.5 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.concretePourDate || '—'}</td>
-                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.brand || '—'}</td>
-                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.cementQty || '—'}</td>
-                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.cementUnit || '—'}</td>
-                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.steelTestResult || '—'}</td>
-                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.soilTestResult || '—'}</td>
-                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.stage4Status || '—'}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap font-mono text-xs ${rowTextClass || 'text-slate-500'}`}>{rfi.concretePourDate || EMPTY_VALUE}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.brand || EMPTY_VALUE}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.cementQty || EMPTY_VALUE}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.cementUnit || EMPTY_VALUE}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.steelTestResult || EMPTY_VALUE}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.soilTestResult || EMPTY_VALUE}</td>
+                      <td className={`px-3 py-0.5 whitespace-nowrap text-xs ${rowTextClass || 'text-slate-600'}`}>{rfi.stage4Status || EMPTY_VALUE}</td>
                       <td className={`px-3 py-0.5 text-xs min-w-[200px] ${rowTextClass || 'text-slate-600'}`}>
-                        <div className="truncate" title={rfi.stage4Note || '—'}>{rfi.stage4Note || '—'}</div>
+                        <div className="truncate" title={rfi.stage4Note || EMPTY_VALUE}>{rfi.stage4Note || EMPTY_VALUE}</div>
                       </td>
                       <td className="px-3 py-0.5">
                         <span className="inline-flex items-center rounded-full bg-green-50 px-2 py-0.5 text-[10px] font-semibold text-green-700">
@@ -1142,12 +1269,12 @@ export default function RfiPage() {
                       </td>
                       <td className="px-3 py-0.5">
                         <span className={`text-[10px] font-semibold px-1.5 py-px rounded-full ${RESULT_COLORS[rfi.statusInsp] || 'bg-slate-100 text-slate-500'}`}>
-                          {rfi.statusInsp || '—'}
+                          {rfi.statusInsp || EMPTY_VALUE}
                         </span>
                       </td>
                       <td className="px-3 py-0.5">
                         <span className={`text-[10px] font-semibold px-1.5 py-px rounded-full ${RESULT_COLORS[rfi.statusDoc] || 'bg-slate-100 text-slate-500'}`}>
-                          {rfi.statusDoc || '—'}
+                          {rfi.statusDoc || EMPTY_VALUE}
                         </span>
                       </td>
                       <td className="px-3 py-0.5 align-middle">
@@ -1156,14 +1283,18 @@ export default function RfiPage() {
                             label={rfi.status7Day || 'Pending'}
                             dueDate={concreteAlerts.due7Date}
                             isDue={concreteAlerts.is7Due}
+                            isSkipped={concreteAlerts.isSkipped}
                             files={rfi.test7DayFiles}
                             uploading={!!uploadingTests[getUploadKey(rfi.id, '7day')]}
+                            canSkip={canSkipConcreteTests && concreteAlerts.is7Due}
+                            skipping={!!skippingConcreteTests[getUploadKey(rfi.id, 'skip-concrete-tests')]}
                             onUploadClick={() => openTestUploadDialog(rfi.id, '7day')}
+                            onSkip={() => handleSkipConcreteTests(rfi)}
                             inputRef={node => setUploadInputRef(rfi.id, '7day', node)}
                             onFileChange={e => handleConcreteTestUpload(rfi, '7day', e.target.files)}
                           />
                         ) : (
-                          <span className="text-xs text-slate-400">—</span>
+                          <span className="text-xs text-slate-400">{EMPTY_VALUE}</span>
                         )}
                       </td>
                       <td className="px-3 py-0.5 align-middle">
@@ -1172,6 +1303,7 @@ export default function RfiPage() {
                             label={rfi.status28Day || 'Pending'}
                             dueDate={concreteAlerts.due28Date}
                             isDue={concreteAlerts.is28Due}
+                            isSkipped={concreteAlerts.isSkipped}
                             files={rfi.test28DayFiles}
                             uploading={!!uploadingTests[getUploadKey(rfi.id, '28day')]}
                             onUploadClick={() => openTestUploadDialog(rfi.id, '28day')}
@@ -1179,7 +1311,7 @@ export default function RfiPage() {
                             onFileChange={e => handleConcreteTestUpload(rfi, '28day', e.target.files)}
                           />
                         ) : (
-                          <span className="text-xs text-slate-400">—</span>
+                          <span className="text-xs text-slate-400">{EMPTY_VALUE}</span>
                         )}
                       </td>
                       <td className="px-3 py-0.5">
@@ -1235,7 +1367,7 @@ export default function RfiPage() {
         </TableColumnVisibility>
       )}
 
-      {/* ── Modals ─────────────────────────────────────────────────────────── */}
+      {/* โ”€โ”€ Modals โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€ */}
       {stage1Modal && (
         <RfiStage1Modal
           rfi={null}

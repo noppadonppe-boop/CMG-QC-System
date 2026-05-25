@@ -118,6 +118,36 @@ const STRUCTURE_TYPE_DEFAULTS = [
   'Other',
 ];
 
+const RFI_STAGE1_OPTION_STORAGE_PREFIX = 'cmg-rfi-stage1-options';
+
+function getOptionStorageKey(projectId, field) {
+  return `${RFI_STAGE1_OPTION_STORAGE_PREFIX}:${projectId || 'global'}:${field}`;
+}
+
+function normalizeOptions(options) {
+  return [...new Set(
+    (options || [])
+      .map((item) => String(item || '').trim())
+      .filter(Boolean),
+  )];
+}
+
+function readStoredOptions(storageKey, defaults, currentValue = '') {
+  const fallback = normalizeOptions(defaults);
+  if (typeof window === 'undefined') {
+    return normalizeOptions([...fallback, currentValue]);
+  }
+
+  try {
+    const raw = window.localStorage.getItem(storageKey);
+    const parsed = raw === null ? fallback : JSON.parse(raw);
+    const base = Array.isArray(parsed) ? normalizeOptions(parsed) : fallback;
+    return normalizeOptions([...base, currentValue]);
+  } catch {
+    return normalizeOptions([...fallback, currentValue]);
+  }
+}
+
 /**
  * Generate next Request No. in format RQI-{ProjectNoNoHyphen}-0001
  * e.g. Project No. J-74 → RQI-J74-0001; CMG-2024-001 → RQI-CMG2024001-0001
@@ -183,6 +213,10 @@ export default function RfiStage1Modal({ rfi, onSave, onClose }) {
   const autoRequestNo = generateRequestNo(selectedProject?.projectNo ?? '', projectRfiItems);
   const requestNo = rfi ? rfi.requestNo : autoRequestNo;
   const [users, setUsers] = useState([]);
+  const tagNoStorageKey = getOptionStorageKey(selectedProjectId, 'tagNo');
+  const workingStepStorageKey = getOptionStorageKey(selectedProjectId, 'workingStep');
+  const structureTypeStorageKey = getOptionStorageKey(selectedProjectId, 'structureType');
+  const typeOfInspectionStorageKey = getOptionStorageKey(selectedProjectId, 'typeOfInspection');
 
   useEffect(() => {
     const unsub = subscribeCategory(categories.users, setUsers);
@@ -225,30 +259,18 @@ export default function RfiStage1Modal({ rfi, onSave, onClose }) {
   const [referDrawingFiles, setReferDrawingFiles] = useState(
     Array.isArray(form.referDrawingFiles) ? form.referDrawingFiles : [],
   );
-  const [tagNoOptions, setTagNoOptions] = useState(() => {
-    const base = [...TAG_NO_DEFAULTS];
-    const current = (rfi?.tagNo || '').trim();
-    if (current && !base.includes(current)) base.unshift(current);
-    return base;
-  });
-  const [workingStepOptions, setWorkingStepOptions] = useState(() => {
-    const base = [...WORKING_STEP_DEFAULTS];
-    const current = (rfi?.workingStep || '').trim();
-    if (current && !base.includes(current)) base.unshift(current);
-    return base;
-  });
-  const [structureTypeOptions, setStructureTypeOptions] = useState(() => {
-    const base = [...STRUCTURE_TYPE_DEFAULTS];
-    const current = (rfi?.structureType || '').trim();
-    if (current && !base.includes(current)) base.unshift(current);
-    return base;
-  });
-  const [typeOfInspectionOptions, setTypeOfInspectionOptions] = useState(() => {
-    const base = [...INSPECTION_TYPES];
-    const current = (rfi?.typeOfInspection || '').trim();
-    if (current && !base.includes(current)) base.unshift(current);
-    return base;
-  });
+  const [tagNoOptions, setTagNoOptions] = useState(() =>
+    readStoredOptions(tagNoStorageKey, TAG_NO_DEFAULTS, rfi?.tagNo),
+  );
+  const [workingStepOptions, setWorkingStepOptions] = useState(() =>
+    readStoredOptions(workingStepStorageKey, WORKING_STEP_DEFAULTS, rfi?.workingStep),
+  );
+  const [structureTypeOptions, setStructureTypeOptions] = useState(() =>
+    readStoredOptions(structureTypeStorageKey, STRUCTURE_TYPE_DEFAULTS, rfi?.structureType),
+  );
+  const [typeOfInspectionOptions, setTypeOfInspectionOptions] = useState(() =>
+    readStoredOptions(typeOfInspectionStorageKey, INSPECTION_TYPES, rfi?.typeOfInspection),
+  );
   const referDrawingInputRef = useRef(null);
   const [referDrawingUploading, setReferDrawingUploading] = useState(false);
   const [referDrawingProgress, setReferDrawingProgress] = useState(0);
@@ -268,6 +290,26 @@ export default function RfiStage1Modal({ rfi, onSave, onClose }) {
       return changed ? next : prev;
     });
   }, [rfi, inspectorAutoName, qcDocRequestedByOptions]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(tagNoStorageKey, JSON.stringify(normalizeOptions(tagNoOptions)));
+  }, [tagNoOptions, tagNoStorageKey]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(workingStepStorageKey, JSON.stringify(normalizeOptions(workingStepOptions)));
+  }, [workingStepOptions, workingStepStorageKey]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(structureTypeStorageKey, JSON.stringify(normalizeOptions(structureTypeOptions)));
+  }, [structureTypeOptions, structureTypeStorageKey]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(typeOfInspectionStorageKey, JSON.stringify(normalizeOptions(typeOfInspectionOptions)));
+  }, [typeOfInspectionOptions, typeOfInspectionStorageKey]);
 
   function addTagNoOption() {
     const val = window.prompt('เพิ่มรายการ Tag No.');
