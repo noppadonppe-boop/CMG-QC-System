@@ -1,8 +1,8 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { FileUp, Send, Trash2, CheckCircle2, XCircle, Loader2, AlertCircle, FileText, FolderOpen, ArrowLeft, Plus, Download } from 'lucide-react';
+import { FileUp, Send, Trash2, CheckCircle2, XCircle, Loader2, AlertCircle, FileText, FolderOpen, ArrowLeft, Plus, Download, ArrowUp, ArrowDown, X, Pencil, RefreshCw, Check } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { PDFDocument } from 'pdf-lib';
-import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject, getBlob } from 'firebase/storage';
 import { storage } from '../../config/firebase';
 import { useApp } from '../../context/AppContext';
 
@@ -93,16 +93,38 @@ export default function ExtractPdfPage() {
   const [folders, setFolders] = useState([]);
   const [rows, setRows] = useState([]);
   
+  // Selection state
+  const [selectedRowIds, setSelectedRowIds] = useState([]);
+
+  // Modal download state
+  const [showDownloadModal, setShowDownloadModal] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(null); // { current, total, status, message }
+  const [needsPdfFile, setNeedsPdfFile] = useState(false); // true = ต้องให้ผู้ใช้เลือกไฟล์ PDF ก่อนดาวน์โหลด
+  const [namingFields, setNamingFields] = useState([
+    { id: 'dwgNo', label: 'DWG NO.', enabled: true },
+    { id: 'title', label: 'TITLE', enabled: true },
+    { id: 'rev', label: 'REV.', enabled: true }
+  ]);
+  const [namingSeparator, setNamingSeparator] = useState('_');
+  const downloadPdfInputRef = useRef(null); // ref สำหรับ input เลือกไฟล์ PDF เพื่อดาวน์โหลด
+
   // UI state
   const [fileName, setFileName] = useState('');
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [isCalculating, setIsCalculating] = useState(false);
+  const [reviewRowId, setReviewRowId] = useState(null); // ID แถวที่กำลังรีวิวใน Modal
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [calcProgress, setCalcProgress] = useState({ current: 0, total: 0 });
   const [thumbnailProgress, setThumbnailProgress] = useState({ current: 0, total: 0 });
   const fileInputRef = useRef(null);
+  const pdfFileRef = useRef(null); // เก็บไฟล์ PDF ดั้งเดิมไว้ในหน่วยความจำ
+
+  // Deletion states
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteStatus, setDeleteStatus] = useState('');
 
   // โหลดข้อมูลจาก Firestore
   useEffect(() => {
@@ -122,6 +144,7 @@ export default function ExtractPdfPage() {
             fileName: item.fileName,
             totalPages: item.totalPages || 0,
             pdfUrl: item.pdfUrl,
+            pdfStoragePath: item.pdfStoragePath,
             createdAt: item.createdAt,
             pages: [],
           };
@@ -146,6 +169,7 @@ export default function ExtractPdfPage() {
       .sort((a, b) => a.page - b.page);
     
     setRows(folderPages);
+    setSelectedRowIds([]); // Reset selection when changing folders
   }, [currentFolder, extractPdfItems]);
 
   async function renderPageThumbnail(page) {
@@ -239,7 +263,10 @@ export default function ExtractPdfPage() {
 
       console.log(`✅ Created ${totalPages} pages in Firestore`);
       
-      // 5. เข้าสู่โฟลเดอร์ที่สร้าง
+      // 5. เก็บไฟล์ PDF ไว้ในหน่วยความจำเพื่อใช้ตอนคำนวน
+      pdfFileRef.current = file;
+      
+      // 6. เข้าสู่โฟลเดอร์ที่สร้าง
       setCurrentFolder({
         id: folderId,
         name: file.name.replace('.pdf', ''),
@@ -259,6 +286,34 @@ export default function ExtractPdfPage() {
       setThumbnailProgress({ current: 0, total: 0 });
     } finally {
       setIsProcessing(false);
+    }
+  }
+
+  // ── ลบโฟลเดอร์และข้อมูลทั้งหมด ──────────────────────────────────────────
+  async function handleDeleteFolder(folder) {
+    setIsDeleting(true);
+    setDeleteStatus('กำลังลบไฟล์ PDF ใน Storage...');
+    try {
+      // 1. ลบ PDF ใน Storage
+      const storagePath = folder.pdfStoragePath || `extract-pdf/${selectedProjectId}/${folder.id}/${folder.fileName}`;
+      const fileRef = storageRef(storage, storagePath);
+      await deleteObject(fileRef).catch(err => {
+        console.warn('Failed to delete file from Storage or file does not exist:', err);
+      });
+
+      setDeleteStatus('กำลังลบข้อมูลในฐานข้อมูล Firebase...');
+      // 2. ลบเอกสารที่เกี่ยวข้องทั้งหมดใน Firestore (ทั้ง folder และ pages ของมัน)
+      const itemsToDelete = extractPdfItems.filter(item => item.folderId === folder.id);
+      await Promise.all(itemsToDelete.map(item => deleteExtractPdf(item.id)));
+
+      console.log('✅ ลบโฟลเดอร์สำเร็จ');
+    } catch (err) {
+      console.error('Error during deletion:', err);
+      alert('เกิดข้อผิดพลาดในการลบโฟลเดอร์: ' + err.message);
+    } finally {
+      setIsDeleting(false);
+      setDeleteStatus('');
+      setDeleteTarget(null);
     }
   }
 
@@ -289,6 +344,229 @@ export default function ExtractPdfPage() {
       });
     } catch (err) {
       console.error('Failed to update Firebase:', err);
+    }
+  }
+
+  // ── จัดการการเลือกแถว (Row Selection) ──────────────────────────────────────
+  const handleToggleRow = (rowId) => {
+    setSelectedRowIds(prev => 
+      prev.includes(rowId) ? prev.filter(id => id !== rowId) : [...prev, rowId]
+    );
+  };
+
+  const handleToggleAll = () => {
+    if (selectedRowIds.length === rows.length) {
+      setSelectedRowIds([]);
+    } else {
+      setSelectedRowIds(rows.map(r => r.id));
+    }
+  };
+
+  // ── จัดการลำดับการตั้งชื่อไฟล์ ─────────────────────────────────────────────────
+  const moveField = (index, direction) => {
+    const newFields = [...namingFields];
+    const targetIndex = index + direction;
+    if (targetIndex >= 0 && targetIndex < newFields.length) {
+      const temp = newFields[index];
+      newFields[index] = newFields[targetIndex];
+      newFields[targetIndex] = temp;
+      setNamingFields(newFields);
+    }
+  };
+
+  const toggleFieldEnabled = (index) => {
+    const newFields = [...namingFields];
+    newFields[index].enabled = !newFields[index].enabled;
+    setNamingFields(newFields);
+  };
+
+  // ── สร้างตัวอย่างชื่อไฟล์สำหรับ Live Preview ──────────────────────────────────
+  const getPreviewFilename = () => {
+    const previewRow = rows.find(r => selectedRowIds.includes(r.id)) || rows[0];
+    if (!previewRow) return 'example.pdf';
+
+    const parts = namingFields
+      .filter(f => f.enabled)
+      .map(f => {
+        if (f.id === 'dwgNo') return previewRow.dwgNo || 'DWG-001';
+        if (f.id === 'title') return previewRow.title || 'FLOOR-PLAN';
+        if (f.id === 'rev') return previewRow.rev || 'A';
+        return '';
+      })
+      .filter(val => val !== '');
+
+    if (parts.length === 0) {
+      return `${(currentFolder?.name || 'document')}_Page_${previewRow.page}.pdf`;
+    }
+
+    return parts.join(namingSeparator) + '.pdf';
+  };
+
+  // ── สร้างชื่อไฟล์สำหรับดาวน์โหลดจริง ──────────────────────────────────────────
+  const buildFilename = (row) => {
+    const parts = namingFields
+      .filter(f => f.enabled)
+      .map(f => {
+        if (f.id === 'dwgNo') return (row.dwgNo || '').trim();
+        if (f.id === 'title') return (row.title || '').trim();
+        if (f.id === 'rev') return (row.rev || '').trim();
+        return '';
+      })
+      .filter(val => val !== '');
+
+    if (parts.length === 0) {
+      return `${(currentFolder?.name || 'document')}_Page_${row.page}`;
+    }
+
+    return parts.join(namingSeparator);
+  };
+
+  const sanitizeFilename = (filename) => {
+    return filename.replace(/[\\/:*?"<>|]/g, '_');
+  };
+
+  // ── ฟังก์ชันดาวน์โหลด PDF แยกหน้าตามรายการที่เลือก ─────────────────────────────
+  async function handleDownloadSelected() {
+    if (selectedRowIds.length === 0) return;
+
+    // ตรวจสอบว่ามีไฟล์ PDF ในหน่วยความจำหรือไม่
+    let pdfFile = pdfFileRef.current;
+
+    // ถ้าไม่มีไฟล์ในหน่วยความจำ → โหลดจาก Firebase Storage โดยตรงผ่าน SDK (ไม่ติด CORS)
+    if (!pdfFile) {
+      // หา Storage Path ของไฟล์ PDF
+      const storagePath = currentFolder?.pdfStoragePath
+        || (currentFolder?.id && currentFolder?.fileName
+          ? `extract-pdf/${selectedProjectId}/${currentFolder.id}/${currentFolder.fileName}`
+          : null);
+
+      if (storagePath) {
+        setDownloadProgress({
+          current: 0,
+          total: selectedRowIds.length,
+          status: 'fetching_pdf',
+          message: 'กำลังโหลดไฟล์ PDF ต้นฉบับจาก Storage...'
+        });
+        try {
+          const fileRef = storageRef(storage, storagePath);
+          
+          // ใช้ Promise.race ร่วมกับ setTimeout เพื่อบังคับให้หยุดรอถ้า Firebase SDK retries นานเกินไป (กรณีติด CORS)
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('TIMEOUT_CORS')), 10000)
+          );
+          
+          const blob = await Promise.race([
+            getBlob(fileRef),
+            timeoutPromise
+          ]);
+          
+          pdfFile = new File([blob], currentFolder.fileName || 'document.pdf', { type: 'application/pdf' });
+          pdfFileRef.current = pdfFile;
+          console.log('✅ PDF downloaded from Firebase Storage via SDK');
+        } catch (storageErr) {
+          if (storageErr.message === 'TIMEOUT_CORS') {
+            console.warn('⚠️ Download timeout: Firebase Storage is blocking the request (CORS issue).');
+          } else {
+            console.warn('⚠️ Failed to download PDF from Storage:', storageErr);
+          }
+        }
+        setDownloadProgress(null);
+      }
+    }
+
+    // ถ้ายังไม่มีไฟล์ PDF → แสดง UI ให้ผู้ใช้เลือกไฟล์ในหน้า Modal (เป็น fallback สำรอง)
+    if (!pdfFile) {
+      setNeedsPdfFile(true);
+      return;
+    }
+
+    // มีไฟล์ PDF แล้ว → เริ่มดาวน์โหลด
+    setNeedsPdfFile(false);
+    await executeDownload(pdfFile);
+  }
+
+  // ── ฟังก์ชันที่ผู้ใช้เลือกไฟล์ PDF จากปุ่มใน Modal (มี user activation) ────────────────
+  function handlePdfFileForDownload(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = ''; // reset input
+
+    pdfFileRef.current = file;
+    setNeedsPdfFile(false);
+
+    // เริ่มดาวน์โหลดอัตโนมัติหลังเลือกไฟล์
+    executeDownload(file);
+  }
+
+  // ── ฟังก์ชันหลักในการแยกหน้าและดาวน์โหลด ─────────────────────────────────────────
+  async function executeDownload(pdfFile) {
+    try {
+      setDownloadProgress({
+        current: 0,
+        total: selectedRowIds.length,
+        status: 'downloading',
+        message: 'กำลังเริ่มต้นดาวน์โหลดไฟล์...'
+      });
+
+      const selectedPages = rows.filter(r => selectedRowIds.includes(r.id));
+
+      for (let i = 0; i < selectedPages.length; i++) {
+        const row = selectedPages[i];
+        
+        setDownloadProgress({
+          current: i + 1,
+          total: selectedPages.length,
+          status: 'downloading',
+          message: `กำลังดาวน์โหลด: หน้า ${row.page} (${i + 1}/${selectedPages.length})`
+        });
+
+        // แยกหน้า PDF เป็น 1 หน้า
+        const singlePageBytes = await extractSinglePagePdfFromBlob(pdfFile, row.page);
+
+        // กำหนดชื่อไฟล์ตามโครงสร้างที่เลือก
+        const customBaseName = buildFilename(row);
+        const finalFilename = sanitizeFilename(customBaseName) + '.pdf';
+
+        // ทริกเกอร์การดาวน์โหลดในบราวเซอร์
+        const blob = new Blob([singlePageBytes], { type: 'application/pdf' });
+        const downloadUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        a.download = finalFilename;
+        document.body.appendChild(a);
+        a.click();
+        
+        // ล้างความจำ
+        document.body.removeChild(a);
+        URL.revokeObjectURL(downloadUrl);
+
+        // หยุดพักเล็กน้อย (250ms) เพื่อป้องกันบราวเซอร์บล็อกการโหลดหลายไฟล์พร้อมกัน
+        if (i < selectedPages.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 250));
+        }
+      }
+
+      setDownloadProgress({
+        current: selectedPages.length,
+        total: selectedPages.length,
+        status: 'completed',
+        message: 'ดาวน์โหลดไฟล์ทั้งหมดเสร็จสิ้น!'
+      });
+
+      setTimeout(() => {
+        setShowDownloadModal(false);
+        setDownloadProgress(null);
+        setSelectedRowIds([]); // รีเซ็ตการเลือก
+      }, 1500);
+
+    } catch (err) {
+      console.error('Download error:', err);
+      setDownloadProgress({
+        current: 0,
+        total: selectedRowIds.length,
+        status: 'error',
+        message: `เกิดข้อผิดพลาดในการดาวน์โหลด: ${err.message || 'ไม่ทราบสาเหตุ'}`
+      });
     }
   }
 
@@ -387,58 +665,133 @@ export default function ExtractPdfPage() {
     setIsSending(false);
   }
 
-  // ── คำนวน (ส่งเฉพาะรายการที่รอคำนวน) ────────────────────────────────────
+  // ── คำนวน — ใช้ไฟล์ PDF ในหน่วยความจำ (ถ้ามี) หรือให้เลือกไฟล์ใหม่ ──
   async function calculateAll() {
     if (!N8N_WEBHOOK_URL) {
       alert('กรุณาตั้งค่า VITE_N8N_WEBHOOK_URL ใน .env ก่อน');
       return;
     }
 
-    const waitingRows = rows.filter(r => r.calcStatus === CALC_STATUS.WAITING);
+    const waitingRows = rows.filter(r =>
+      r.calcStatus === CALC_STATUS.WAITING ||
+      r.calcStatus === CALC_STATUS.WAITING_CLOUD ||
+      r.calcStatus === CALC_STATUS.CALC_ERROR
+    );
     if (!waitingRows.length) {
       alert('ไม่มีรายการที่รอคำนวน');
       return;
     }
 
+    // 1. หาไฟล์ PDF ที่ใช้งาน
+    let pdfFile = pdfFileRef.current;
+
+    if (!pdfFile) {
+      // ไม่มีไฟล์ในหน่วยความจำ (เช่น เปิดโฟลเดอร์เก่า) → ให้ผู้ใช้เลือกไฟล์ PDF อีกครั้ง
+      const confirmed = window.confirm(
+        'ไฟล์ PDF ไม่ได้อยู่ในหน่วยความจำ (อาจเป็นเพราะเปิดโฟลเดอร์เก่า)\n\n' +
+        'กรุณาเลือกไฟล์ PDF เดิมอีกครั้งเพื่อใช้ในการคำนวน\n\n' +
+        `ไฟล์ที่ต้องการ: ${currentFolder?.fileName || 'PDF file'}`
+      );
+      if (!confirmed) return;
+
+      pdfFile = await new Promise((resolve) => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'application/pdf';
+        input.onchange = (e) => resolve(e.target.files?.[0] || null);
+        input.click();
+      });
+
+      if (!pdfFile) {
+        alert('ไม่ได้เลือกไฟล์ PDF');
+        return;
+      }
+
+      // เก็บไว้ใช้ครั้งถัดไปโดยไม่ต้องเลือกใหม่
+      pdfFileRef.current = pdfFile;
+    }
+
     setIsCalculating(true);
     setCalcProgress({ current: 0, total: waitingRows.length });
 
-    // Update Firestore statuses so Cloud Functions can pick them up
+    const TIMEOUT_MS = 120_000; // 120 วินาที ต่อรายการ
+    let calcSuccessCount = 0;
+    let calcErrorCount = 0;
+
+    // 2. วนลูปทีละ 1 รายการ (queue)
     for (let i = 0; i < waitingRows.length; i++) {
       const row = waitingRows[i];
 
-      const updateData = {
-        calcStatus: CALC_STATUS.WAITING_CLOUD,
-        webhookUrl: N8N_WEBHOOK_URL,
-        updatedAt: new Date().toISOString(),
-      };
-
-      // Fallback for old items without pdfStoragePath
-      if (!row.pdfStoragePath && currentFolder?.id) {
-        updateData.pdfStoragePath = `extract-pdf/${selectedProjectId}/${currentFolder.id}/${currentFolder.fileName}`;
-      }
-
-      // Update local state immediately
-      setRows(prev => prev.map(r =>
-        r.id === row.id ? { ...r, ...updateData } : r
-      ));
+      // อัปเดตสถานะ → กำลังคำนวน
+      const statusCalcing = { calcStatus: CALC_STATUS.CALCULATING, updatedAt: new Date().toISOString() };
+      setRows(prev => prev.map(r => r.id === row.id ? { ...r, ...statusCalcing } : r));
+      await updateExtractPdf(row.id, statusCalcing).catch(() => {});
 
       try {
-        await updateExtractPdf(row.id, updateData);
-        console.log(`✅ Page ${row.page} sent to cloud queue`);
+        // A. แยกหน้า PDF เดี่ยวจากไฟล์ในหน่วยความจำ
+        const singlePageBytes = await extractSinglePagePdfFromBlob(pdfFile, row.page);
+        const singlePageFileName = `${(row.fileName || 'page').replace('.pdf', '')}_page_${row.page}.pdf`;
+
+        // B. เตรียม FormData
+        const formData = new FormData();
+        formData.append('file', new Blob([singlePageBytes], { type: 'application/pdf' }), singlePageFileName);
+        formData.append('fileName', row.fileName || '');
+        formData.append('page', String(row.page));
+        formData.append('total', String(row.totalPages || 0));
+        formData.append('pageNumber', String(row.page));
+
+        // C. ส่งไปยัง n8n พร้อม timeout
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
+        const res = await fetch(N8N_WEBHOOK_URL, {
+          method: 'POST',
+          body: formData,
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+
+        if (!res.ok) throw new Error(`n8n responded ${res.status}: ${res.statusText}`);
+
+        let responseData = null;
+        try { responseData = await res.json(); } catch { /* non-json */ }
+
+        const resp = responseData || {};
+        const dwgNo = resp.dwgNo || resp.dwgno || resp.DWG_NO || '';
+        const title = resp.title || resp.TITLE || '';
+        const rev   = resp.rev   || resp.REV   || '';
+
+        // D. สำเร็จ → อัปเดต local + Firestore
+        const ok = {
+          calcStatus: CALC_STATUS.CALCULATED,
+          dwgNo, title, rev,
+          calcResponse: responseData || null,
+          updatedAt: new Date().toISOString(),
+        };
+        setRows(prev => prev.map(r => r.id === row.id ? { ...r, ...ok } : r));
+        await updateExtractPdf(row.id, ok);
+        calcSuccessCount++;
+        console.log(`✅ Page ${row.page} OK:`, { dwgNo, title, rev });
+
       } catch (err) {
-        console.error('❌ Failed to update Firebase:', err);
-        // Revert local state on error
-        setRows(prev => prev.map(r =>
-          r.id === row.id ? { ...r, calcStatus: CALC_STATUS.CALC_ERROR, calcResponse: err.message } : r
-        ));
+        // Skip & ไปรายการถัดไป
+        const errMsg = err.name === 'AbortError' ? 'Timeout (120s)' : err.message;
+        console.warn(`⏭️ Page ${row.page} skipped:`, errMsg);
+        const fail = {
+          calcStatus: CALC_STATUS.CALC_ERROR,
+          calcResponse: errMsg,
+          updatedAt: new Date().toISOString(),
+        };
+        setRows(prev => prev.map(r => r.id === row.id ? { ...r, ...fail } : r));
+        await updateExtractPdf(row.id, fail).catch(() => {});
+        calcErrorCount++;
       }
 
       setCalcProgress({ current: i + 1, total: waitingRows.length });
     }
 
     setIsCalculating(false);
-    alert('ส่งรายการไปคำนวนบนคลาวด์แล้ว คุณสามารถปิดเบราว์เซอร์หรือไปทำอย่างอื่นได้เลยครับ ระบบจะทำการประมวลผลอยู่เบื้องหลัง');
+    alert(`คำนวนเสร็จสิ้น!\nสำเร็จ: ${calcSuccessCount} รายการ\nล้มเหลว/Timeout: ${calcErrorCount} รายการ`);
   }
 
   // ── Clear ────────────────────────────────────────────────────────────────
@@ -558,9 +911,21 @@ export default function ExtractPdfPage() {
                     <div className="w-12 h-12 rounded-lg bg-orange-50 group-hover:bg-orange-100 flex items-center justify-center transition-colors">
                       <FolderOpen size={24} className="text-orange-500" />
                     </div>
-                    <span className="text-xs text-slate-500 bg-slate-100 px-2 py-1 rounded-full">
-                      {folder.pages?.length || folder.totalPages || 0} หน้า
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full font-medium">
+                        {folder.pages?.length || folder.totalPages || 0} หน้า
+                      </span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDeleteTarget(folder);
+                        }}
+                        className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
+                        title="ลบโฟลเดอร์"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
                   </div>
                   <h3 className="text-sm font-semibold text-slate-800 truncate mb-1" title={folder.name}>
                     {folder.name}
@@ -611,18 +976,13 @@ export default function ExtractPdfPage() {
 
               <div className="flex items-center gap-3">
                 {/* Progress */}
-                {isSending && (
-                  <div className="text-xs font-medium text-slate-500">
-                    ส่ง: {progress.current} / {progress.total}
-                  </div>
-                )}
                 {isCalculating && (
                   <div className="text-xs font-medium text-purple-600">
                     คำนวน: {calcProgress.current} / {calcProgress.total}
                   </div>
                 )}
                 {/* Summary badges */}
-                {!isSending && !isCalculating && (
+                {!isCalculating && (
                   <>
                     {waitingCalcCount > 0 && (
                       <span className="text-xs text-amber-600 font-medium">{waitingCalcCount} รอคำนวน</span>
@@ -633,34 +993,26 @@ export default function ExtractPdfPage() {
                     {calculatedCount > 0 && (
                       <span className="text-xs text-green-600 font-medium">{calculatedCount} คำนวนแล้ว</span>
                     )}
-                    {successCount > 0 && (
-                      <span className="text-xs text-emerald-600 font-medium">{successCount} ส่งสำเร็จ</span>
-                    )}
-                    {errorCount > 0 && (
-                      <span className="text-xs text-red-600 font-medium">{errorCount} ผิดพลาด</span>
-                    )}
                   </>
                 )}
 
                 <button
+                  onClick={() => setShowDownloadModal(true)}
+                  disabled={selectedRowIds.length === 0 || isCalculating || isSending}
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-lg transition-colors"
+                >
+                  <Download size={14} />
+                  ดาวน์โหลด ({selectedRowIds.length})
+                </button>
+
+                <button
                   onClick={calculateAll}
-                  disabled={isCalculating || isSending || !N8N_WEBHOOK_URL || waitingCalcCount === 0}
+                  disabled={isCalculating || !N8N_WEBHOOK_URL || waitingCalcCount === 0}
                   className="flex items-center gap-2 px-4 py-2 bg-purple-500 hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-lg transition-colors"
                 >
                   {isCalculating
                     ? <><Loader2 size={14} className="animate-spin" /> กำลังคำนวน…</>
                     : <><AlertCircle size={14} /> คำนวน ({waitingCalcCount})</>
-                  }
-                </button>
-
-                <button
-                  onClick={sendAll}
-                  disabled={isSending || isCalculating || !N8N_WEBHOOK_URL}
-                  className="flex items-center gap-2 px-4 py-2 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-lg transition-colors"
-                >
-                  {isSending
-                    ? <><Loader2 size={14} className="animate-spin" /> กำลังส่ง…</>
-                    : <><Send size={14} /> ส่งทั้งหมด ({rows.length})</>
                   }
                 </button>
               </div>
@@ -682,21 +1034,7 @@ export default function ExtractPdfPage() {
               </div>
             </div>
           )}
-          
-          {isSending && progress.total > 0 && (
-            <div className="space-y-1">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-orange-700 font-medium">กำลังส่งข้อมูล...</span>
-                <span className="text-orange-600">{progress.current} / {progress.total}</span>
-              </div>
-              <div className="w-full bg-orange-100 rounded-full h-2">
-                <div
-                  className="bg-orange-500 h-2 rounded-full transition-all duration-300"
-                  style={{ width: `${(progress.current / progress.total) * 100}%` }}
-                />
-              </div>
-            </div>
-          )}
+
 
           {/* Thumbnail generation progress */}
           {isProcessing && thumbnailProgress.total > 0 && (
@@ -720,118 +1058,108 @@ export default function ExtractPdfPage() {
           {/* Table */}
           {rows.length > 0 && (
             <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-              <table className="w-full text-xs">
+              <table className="w-full text-xs" style={{ tableLayout: 'auto' }}>
                 <thead>
                   <tr className="border-b border-slate-200 bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500">
-                    <th className="px-4 py-3 font-semibold w-16 text-center">หน้า</th>
-                    <th className="px-4 py-3 font-semibold w-48 text-center">Thumbnail</th>
-                    <th className="px-4 py-3 font-semibold w-48">DWG NO.</th>
-                    <th className="px-4 py-3 font-semibold">TITLE</th>
-                    <th className="px-4 py-3 font-semibold w-28">REV.</th>
-                    <th className="px-4 py-3 font-semibold w-36 text-center">สถานะการคำนวน</th>
-                    <th className="px-4 py-3 font-semibold w-32 text-center">สถานะการส่ง</th>
+                    <th className="px-2 py-2 font-semibold text-center" style={{ width: '36px' }}>
+                      <input
+                        type="checkbox"
+                        checked={rows.length > 0 && selectedRowIds.length === rows.length}
+                        ref={el => {
+                          if (el) {
+                            el.indeterminate = selectedRowIds.length > 0 && selectedRowIds.length < rows.length;
+                          }
+                        }}
+                        onChange={handleToggleAll}
+                        className="rounded border-slate-300 text-orange-600 focus:ring-orange-500 h-3.5 w-3.5 cursor-pointer"
+                      />
+                    </th>
+                    <th className="px-2 py-2 font-semibold text-center whitespace-nowrap">หน้า</th>
+                    <th className="px-2 py-2 font-semibold text-center whitespace-nowrap">Thumbnail</th>
+                    <th className="px-2 py-2 font-semibold whitespace-nowrap">DWG NO.</th>
+                    <th className="px-2 py-2 font-semibold">TITLE</th>
+                    <th className="px-2 py-2 font-semibold whitespace-nowrap">REV.</th>
+                    <th className="px-2 py-2 font-semibold text-center whitespace-nowrap">สถานะการคำนวน</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 bg-white">
                   {rows.map((row, index) => (
                     <tr
                       key={row.id}
-                      className={`transition-colors ${
-                        row.status === STATUS.SUCCESS ? 'bg-emerald-50/50 hover:bg-emerald-50' :
-                        row.status === STATUS.ERROR   ? 'bg-red-50/50 hover:bg-red-50' :
-                        row.status === STATUS.SENDING ? 'bg-blue-50/50 hover:bg-blue-50' :
+                      onClick={(e) => {
+                        // ไม่เปิด Modal ถ้ากด checkbox หรือปุ่มอื่นๆ ด้านใน
+                        if (!e.target.closest('input') && !e.target.closest('button')) {
+                          setReviewRowId(row.id);
+                        }
+                      }}
+                      className={`transition-colors cursor-pointer ${
+                        selectedRowIds.includes(row.id) ? 'bg-orange-50/30 hover:bg-orange-50/50 border-l-2 border-orange-500' :
+                        row.isApproved ? 'bg-emerald-50 hover:bg-emerald-100 border-l-2 border-emerald-500' :
                         index % 2 === 0 ? 'bg-white hover:bg-orange-50/50' : 'bg-slate-50/60 hover:bg-orange-50/50'
                       }`}
                     >
+                      {/* Checkbox */}
+                      <td className="px-2 py-1 text-center">
+                        <input
+                          type="checkbox"
+                          checked={selectedRowIds.includes(row.id)}
+                          onChange={() => handleToggleRow(row.id)}
+                          className="rounded border-slate-300 text-orange-600 focus:ring-orange-500 h-3.5 w-3.5 cursor-pointer"
+                        />
+                      </td>
+
                       {/* Page number */}
-                      <td className="px-4 py-3 text-center text-slate-500 font-mono">
+                      <td className="px-2 py-1 text-center text-slate-500 font-mono whitespace-nowrap">
                         {row.page}
                       </td>
 
                       {/* Thumbnail */}
-                      <td className="px-4 py-3">
+                      <td className="px-2 py-1">
                         <div className="flex items-center justify-center">
                           {row.thumbnail ? (
                             <div className="relative group">
                               <img
                                 src={row.thumbnail}
                                 alt={`Page ${row.page}`}
-                                className="w-32 h-auto rounded-lg border-2 border-slate-200 shadow-sm transition-all group-hover:border-orange-400 group-hover:shadow-md cursor-pointer"
+                                className="w-20 h-auto rounded border border-slate-200 shadow-sm transition-all group-hover:border-orange-400 group-hover:shadow-md cursor-pointer"
                                 onClick={() => {
                                   const win = window.open();
                                   win.document.write(`<img src="${row.thumbnail}" style="max-width:100%; height:auto;" />`);
                                 }}
                               />
-                              <div className="absolute inset-0 flex items-center justify-center bg-black/0 group-hover:bg-black/10 rounded-lg transition-colors pointer-events-none">
-                                <span className="text-[10px] font-semibold text-white opacity-0 group-hover:opacity-100 bg-slate-900/80 px-2 py-1 rounded">
-                                  คลิกเพื่อดูขนาดเต็ม
-                                </span>
-                              </div>
                             </div>
                           ) : (
-                            <div className="w-32 h-20 rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 flex items-center justify-center">
-                              <Loader2 size={16} className="animate-spin text-slate-400" />
+                            <div className="w-20 h-14 rounded border border-dashed border-slate-300 bg-slate-50 flex items-center justify-center">
+                              <Loader2 size={12} className="animate-spin text-slate-400" />
                             </div>
                           )}
                         </div>
                       </td>
 
                       {/* DWG NO. */}
-                      <td className="px-4 py-2.5">
-                        <input
-                          type="text"
-                          value={row.dwgNo || ''}
-                          onChange={e => updateRow(row.id, 'dwgNo', e.target.value)}
-                          disabled={isSending || isCalculating}
-                          placeholder="DWG-XXXX"
-                          className={`w-full rounded-md border px-3 py-2 text-xs shadow-sm placeholder:text-slate-400 transition-colors focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-500/15 disabled:bg-slate-100 disabled:text-slate-400 ${
-                            row.calcStatus === CALC_STATUS.CALCULATED && row.dwgNo
-                              ? 'border-green-300 bg-green-50 text-green-900 font-medium'
-                              : 'border-slate-200 bg-white text-slate-800'
-                          }`}
-                        />
+                      <td className="px-2 py-1">
+                        <span className={`text-xs ${row.dwgNo ? 'text-slate-800 font-medium' : 'text-slate-400 italic'}`}>
+                          {row.dwgNo || '-'}
+                        </span>
                       </td>
 
                       {/* TITLE */}
-                      <td className="px-4 py-2.5">
-                        <input
-                          type="text"
-                          value={row.title || ''}
-                          onChange={e => updateRow(row.id, 'title', e.target.value)}
-                          disabled={isSending || isCalculating}
-                          placeholder="Drawing Title"
-                          className={`w-full rounded-md border px-3 py-2 text-xs shadow-sm placeholder:text-slate-400 transition-colors focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-500/15 disabled:bg-slate-100 disabled:text-slate-400 ${
-                            row.calcStatus === CALC_STATUS.CALCULATED && row.title
-                              ? 'border-green-300 bg-green-50 text-green-900 font-medium'
-                              : 'border-slate-200 bg-white text-slate-800'
-                          }`}
-                        />
+                      <td className="px-2 py-1">
+                        <span className={`text-xs ${row.title ? 'text-slate-800 font-medium' : 'text-slate-400 italic'}`}>
+                          {row.title || '-'}
+                        </span>
                       </td>
 
                       {/* REV. */}
-                      <td className="px-4 py-2.5">
-                        <input
-                          type="text"
-                          value={row.rev || ''}
-                          onChange={e => updateRow(row.id, 'rev', e.target.value)}
-                          disabled={isSending || isCalculating}
-                          placeholder="A0"
-                          className={`w-full rounded-md border px-3 py-2 text-xs shadow-sm placeholder:text-slate-400 transition-colors focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-500/15 disabled:bg-slate-100 disabled:text-slate-400 ${
-                            row.calcStatus === CALC_STATUS.CALCULATED && row.rev
-                              ? 'border-green-300 bg-green-50 text-green-900 font-medium'
-                              : 'border-slate-200 bg-white text-slate-800'
-                          }`}
-                        />
+                      <td className="px-2 py-1">
+                        <span className={`text-xs ${row.rev ? 'text-slate-800 font-medium' : 'text-slate-400 italic'}`}>
+                          {row.rev || '-'}
+                        </span>
                       </td>
 
                       {/* Calc Status */}
-                      <td className="px-4 py-2.5 text-center">
+                      <td className="px-2 py-1 text-center">
                         <CalcStatusBadge calcStatus={row.calcStatus} message={row.calcResponse} />
-                      </td>
-
-                      {/* Send Status */}
-                      <td className="px-4 py-2.5 text-center">
-                        <StatusBadge status={row.status} message={row.response} />
                       </td>
                     </tr>
                   ))}
@@ -842,14 +1170,457 @@ export default function ExtractPdfPage() {
         </>
       )}
 
-      {/* Hidden file input */}
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="application/pdf"
-        className="hidden"
-        onChange={handleFileChange}
+        {/* ── Confirm Delete Modal ── */}
+        {deleteTarget && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => !isDeleting && setDeleteTarget(null)} />
+            <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-red-100 flex items-center justify-center shrink-0">
+                  {isDeleting ? (
+                    <Loader2 size={18} className="text-red-600 animate-spin" />
+                  ) : (
+                    <Trash2 size={18} className="text-red-600" />
+                  )}
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-sm font-bold text-slate-800">ยืนยันการลบโฟลเดอร์งาน?</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    การดำเนินการนี้จะลบหน้าทั้งหมดในระบบรวมถึงไฟล์ในคลาวด์และไม่สามารถกู้คืนได้
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-slate-50 rounded-xl px-4 py-3 border border-slate-100">
+                <div className="text-xs font-semibold text-slate-700 truncate" title={deleteTarget.name}>
+                  ชื่อโฟลเดอร์: {deleteTarget.name}
+                </div>
+                <div className="text-[10px] text-slate-500 mt-1">
+                  จำนวน: {deleteTarget.pages?.length || deleteTarget.totalPages || 0} หน้า · {deleteTarget.fileName}
+                </div>
+              </div>
+
+              {isDeleting && (
+                <div className="flex items-center gap-2 text-xs font-medium text-red-600 justify-center py-1">
+                  <Loader2 size={14} className="animate-spin" />
+                  <span>{deleteStatus}</span>
+                </div>
+              )}
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={() => setDeleteTarget(null)}
+                  disabled={isDeleting}
+                  className="flex-1 px-4 py-2.5 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors disabled:opacity-50"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  onClick={() => handleDeleteFolder(deleteTarget)}
+                  disabled={isDeleting}
+                  className="flex-1 px-4 py-2.5 text-xs font-semibold text-white bg-red-500 hover:bg-red-600 rounded-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  {isDeleting ? 'กำลังลบ...' : 'ลบโฟลเดอร์'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Download Config Modal ── */}
+        {showDownloadModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div 
+              className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" 
+              onClick={() => !downloadProgress && setShowDownloadModal(false)} 
+            />
+            <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 space-y-5">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600">
+                    <Download size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-800">ตั้งค่าและดาวน์โหลด PDF แยกหน้า</h3>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      เลือกรูปแบบและลำดับในการตั้งชื่อไฟล์ PDF ที่จะทำการดาวน์โหลด
+                    </p>
+                  </div>
+                </div>
+                {!downloadProgress && (
+                  <button 
+                    onClick={() => setShowDownloadModal(false)}
+                    className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-lg transition-colors"
+                  >
+                    <X size={16} />
+                  </button>
+                )}
+              </div>
+
+              {downloadProgress ? (
+                // หน้าจอแสดงความคืบหน้าการดาวน์โหลด
+                <div className="py-8 flex flex-col items-center justify-center space-y-4 text-center">
+                  {downloadProgress.status === 'downloading' || downloadProgress.status === 'fetching_pdf' ? (
+                    <Loader2 size={36} className="text-blue-500 animate-spin" />
+                  ) : downloadProgress.status === 'completed' ? (
+                    <div className="w-12 h-12 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 animate-bounce">
+                      <CheckCircle2 size={24} />
+                    </div>
+                  ) : (
+                    <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center text-red-600">
+                      <AlertCircle size={24} />
+                    </div>
+                  )}
+
+                  <div className="space-y-1 px-4">
+                    <p className="text-sm font-semibold text-slate-800">
+                      {downloadProgress.message}
+                    </p>
+                    {downloadProgress.total > 0 && downloadProgress.status !== 'fetching_pdf' && (
+                      <p className="text-xs text-slate-500">
+                        {downloadProgress.current} จากทั้งหมด {downloadProgress.total} รายการ
+                      </p>
+                    )}
+                  </div>
+
+                  {downloadProgress.total > 0 && downloadProgress.status !== 'fetching_pdf' && (
+                    <div className="w-full max-w-xs bg-slate-100 rounded-full h-2 overflow-hidden shadow-inner">
+                      <div 
+                        className={`h-2 rounded-full transition-all duration-300 ${
+                          downloadProgress.status === 'completed' ? 'bg-emerald-500' :
+                          downloadProgress.status === 'error' ? 'bg-red-500' : 'bg-blue-500'
+                        }`}
+                        style={{ width: `${(downloadProgress.current / downloadProgress.total) * 100}%` }}
+                      />
+                    </div>
+                  )}
+
+                  {downloadProgress.status === 'error' && (
+                    <button
+                      onClick={() => setDownloadProgress(null)}
+                      className="mt-4 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition-colors"
+                    >
+                      ลองใหม่
+                    </button>
+                  )}
+                </div>
+              ) : (
+                // หน้าจอตั้งค่าชื่อไฟล์
+                <>
+                  <div className="space-y-4">
+                    {/* ส่วนเลือกและสลับลำดับคอลัมน์ */}
+                    <div className="space-y-2">
+                      <label className="text-xs font-semibold text-slate-700">เลือกลำดับและการใช้งานคอลัมน์ในการตั้งชื่อไฟล์</label>
+                      <div className="border border-slate-200 rounded-xl divide-y divide-slate-100 bg-slate-50/50 overflow-hidden">
+                        {namingFields.map((field, idx) => (
+                          <div key={field.id} className="flex items-center justify-between p-3 bg-white hover:bg-slate-50/50 transition-colors">
+                            <div className="flex items-center gap-3">
+                              <input 
+                                type="checkbox"
+                                id={`check-${field.id}`}
+                                checked={field.enabled}
+                                onChange={() => toggleFieldEnabled(idx)}
+                                className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 h-4 w-4 cursor-pointer"
+                              />
+                              <label htmlFor={`check-${field.id}`} className={`text-xs font-semibold cursor-pointer ${field.enabled ? 'text-slate-800' : 'text-slate-400'}`}>
+                                {field.label}
+                              </label>
+                            </div>
+                            
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                onClick={() => moveField(idx, -1)}
+                                disabled={idx === 0}
+                                className="p-1 text-slate-400 hover:text-slate-700 disabled:opacity-30 disabled:hover:text-slate-400 rounded transition-colors"
+                                title="เลื่อนขึ้น"
+                              >
+                                <ArrowUp size={14} />
+                              </button>
+                              <button
+                                onClick={() => moveField(idx, 1)}
+                                disabled={idx === namingFields.length - 1}
+                                className="p-1 text-slate-400 hover:text-slate-700 disabled:opacity-30 disabled:hover:text-slate-400 rounded transition-colors"
+                                title="เลื่อนลง"
+                              >
+                                <ArrowDown size={14} />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* เลือกตัวเชื่อม Separator */}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <label htmlFor="separator-select" className="text-xs font-semibold text-slate-700">ตัวเชื่อมชื่อไฟล์ (Separator)</label>
+                        <select
+                          id="separator-select"
+                          value={namingSeparator}
+                          onChange={(e) => setNamingSeparator(e.target.value)}
+                          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs bg-white text-slate-800 shadow-sm focus:border-blue-500 focus:outline-none"
+                        >
+                          <option value="_">Under Score ( _ )</option>
+                          <option value="-">Dash ( - )</option>
+                          <option value=" ">Space (   )</option>
+                          <option value="">ไม่มีตัวเชื่อม</option>
+                        </select>
+                      </div>
+
+                      <div className="bg-blue-50/50 border border-blue-100 rounded-xl px-4 py-3 flex flex-col justify-center">
+                        <span className="text-[10px] text-blue-500 font-semibold uppercase tracking-wider">ดาวน์โหลดทั้งหมด</span>
+                        <span className="text-sm font-bold text-blue-700 mt-0.5">{selectedRowIds.length} ไฟล์ PDF</span>
+                      </div>
+                    </div>
+
+                    {/* แสดงตัวอย่างชื่อไฟล์ (Live Preview) */}
+                    <div className="bg-slate-900 text-slate-200 rounded-xl px-4 py-3 border border-slate-800 font-mono text-[11px] space-y-1 shadow-inner">
+                      <div className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">ตัวอย่างชื่อไฟล์ (Live Preview)</div>
+                      <div className="text-emerald-400 font-semibold truncate mt-1">
+                        {getPreviewFilename()}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* แสดง UI เลือกไฟล์ PDF เมื่อจำเป็น */}
+                  {needsPdfFile && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3">
+                      <div className="flex items-start gap-2.5">
+                        <AlertCircle size={16} className="text-amber-600 mt-0.5 shrink-0" />
+                        <div className="space-y-1">
+                          <p className="text-xs font-semibold text-amber-800">ต้องเลือกไฟล์ PDF ต้นฉบับ</p>
+                          <p className="text-[11px] text-amber-700">
+                            ไม่พบไฟล์ PDF ในหน่วยความจำ กรุณาเลือกไฟล์ PDF เดิมเพื่อแยกหน้าสำหรับดาวน์โหลด
+                          </p>
+                          <p className="text-[11px] text-amber-600 font-mono">
+                            ไฟล์ที่ต้องการ: {currentFolder?.fileName || 'PDF file'}
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => downloadPdfInputRef.current?.click()}
+                        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-amber-800 bg-amber-100 hover:bg-amber-200 border border-amber-300 rounded-lg transition-colors"
+                      >
+                        <FileUp size={14} />
+                        เลือกไฟล์ PDF ต้นฉบับ
+                      </button>
+                    </div>
+                  )}
+
+                  {/* ปุ่มควบคุม */}
+                  <div className="flex gap-3 pt-2 border-t border-slate-100">
+                    <button
+                      onClick={() => { setShowDownloadModal(false); setNeedsPdfFile(false); setDownloadProgress(null); }}
+                      className="flex-1 px-4 py-2.5 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+                    >
+                      ยกเลิก
+                    </button>
+                    <button
+                      onClick={handleDownloadSelected}
+                      disabled={needsPdfFile}
+                      className="flex-1 px-4 py-2.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors flex items-center justify-center gap-1.5 shadow-sm"
+                    >
+                      <Download size={14} />
+                      เริ่มดาวน์โหลด
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Hidden file input for upload */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="application/pdf"
+          className="hidden"
+          onChange={handleFileChange}
+        />
+
+        {/* Hidden file input for download PDF source selection */}
+        <input
+          ref={downloadPdfInputRef}
+          type="file"
+          accept="application/pdf"
+          className="hidden"
+          onChange={handlePdfFileForDownload}
+        />
+      {/* ── Review Modal ── */}
+      {reviewRowId && (
+        <ReviewModal
+          row={rows.find(r => r.id === reviewRowId)}
+          onClose={() => setReviewRowId(null)}
+          updateRow={updateRow}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Review Modal Component ──────────────────────────────────────────────────────────
+function ReviewModal({ row, onClose, updateRow }) {
+  const scrollRef = useRef(null);
+
+  // เลื่อน scroll ไปที่มุมขวาล่างทันทีที่เปิด
+  useEffect(() => {
+    if (scrollRef.current) {
+      const el = scrollRef.current;
+      el.scrollTop = el.scrollHeight;
+      el.scrollLeft = el.scrollWidth;
+    }
+  }, []);
+
+  if (!row) return null;
+
+  const handleRecalculate = () => {
+    updateRow(row.id, 'dwgNo', '');
+    updateRow(row.id, 'title', '');
+    updateRow(row.id, 'rev', '');
+    updateRow(row.id, 'calcStatus', 'WAITING');
+    updateRow(row.id, 'isApproved', false);
+    onClose();
+  };
+
+  const handleApprove = () => {
+    updateRow(row.id, 'isApproved', true);
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div 
+        className="absolute inset-0 bg-slate-900/70 backdrop-blur-sm" 
+        onClick={onClose} 
       />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-5xl flex flex-col h-[85vh] overflow-hidden">
+        
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-white">
+          <div>
+            <h3 className="text-base font-bold text-slate-800">ตรวจสอบความถูกต้อง (หน้า {row.page})</h3>
+            <p className="text-xs text-slate-500 mt-0.5">คุณสามารถซูมและเลื่อนดูรายละเอียดจากรูปต้นฉบับได้</p>
+          </div>
+          <button 
+            onClick={onClose}
+            className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        {/* Content - 2 Columns */}
+        <div className="flex flex-1 overflow-hidden bg-slate-50">
+          
+          {/* Left Column (Image Viewer) - 60% */}
+          <div className="w-3/5 border-r border-slate-200 relative bg-slate-100 overflow-hidden flex flex-col">
+            <div className="absolute top-3 left-3 z-10 bg-black/60 text-white px-2 py-1 rounded text-[10px] font-mono shadow">
+              100% Zoom (Bottom-Right Focused)
+            </div>
+            
+            <div 
+              ref={scrollRef}
+              className="flex-1 overflow-auto custom-scrollbar"
+              style={{ padding: '20px' }}
+            >
+              {row.thumbnail ? (
+                <div className="min-w-fit min-h-fit bg-white shadow-sm border border-slate-200 rounded">
+                  <img 
+                    src={row.thumbnail} 
+                    alt={`Page ${row.page}`}
+                    className="max-w-none block"
+                    style={{ width: 'auto', height: 'auto', transform: 'scale(1)', transformOrigin: 'top left' }}
+                  />
+                </div>
+              ) : (
+                <div className="h-full flex flex-col items-center justify-center text-slate-400">
+                  <Loader2 size={32} className="animate-spin mb-2" />
+                  <p className="text-sm">กำลังโหลดรูปภาพ...</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Right Column (Data Fields) - 40% */}
+          <div className="w-2/5 bg-white p-6 flex flex-col justify-between overflow-y-auto">
+            <div className="space-y-5">
+              
+              {/* Field: DWG NO */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider flex items-center justify-between">
+                  DWG NO.
+                  <Pencil size={12} className="text-slate-300" />
+                </label>
+                <div className="relative group">
+                  <input
+                    type="text"
+                    value={row.dwgNo || ''}
+                    onChange={e => updateRow(row.id, 'dwgNo', e.target.value)}
+                    placeholder="DWG-XXXX"
+                    className="w-full rounded-lg border-2 border-slate-200 px-4 py-2.5 text-sm font-medium shadow-sm transition-colors focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/10 group-hover:border-blue-300"
+                  />
+                </div>
+              </div>
+
+              {/* Field: TITLE */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider flex items-center justify-between">
+                  TITLE
+                  <Pencil size={12} className="text-slate-300" />
+                </label>
+                <div className="relative group">
+                  <input
+                    type="text"
+                    value={row.title || ''}
+                    onChange={e => updateRow(row.id, 'title', e.target.value)}
+                    placeholder="Drawing Title"
+                    className="w-full rounded-lg border-2 border-slate-200 px-4 py-2.5 text-sm font-medium shadow-sm transition-colors focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/10 group-hover:border-blue-300"
+                  />
+                </div>
+              </div>
+
+              {/* Field: REV */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider flex items-center justify-between">
+                  REV.
+                  <Pencil size={12} className="text-slate-300" />
+                </label>
+                <div className="relative group">
+                  <input
+                    type="text"
+                    value={row.rev || ''}
+                    onChange={e => updateRow(row.id, 'rev', e.target.value)}
+                    placeholder="A0"
+                    className="w-full rounded-lg border-2 border-slate-200 px-4 py-2.5 text-sm font-medium shadow-sm transition-colors focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/10 group-hover:border-blue-300"
+                  />
+                </div>
+              </div>
+
+            </div>
+
+            {/* Bottom Actions */}
+            <div className="grid grid-cols-2 gap-3 mt-8 pt-4 border-t border-slate-100">
+              <button
+                onClick={handleRecalculate}
+                className="flex items-center justify-center gap-2 px-4 py-3 bg-amber-50 hover:bg-amber-100 text-amber-700 font-bold rounded-xl transition-colors border border-amber-200"
+              >
+                <RefreshCw size={16} />
+                คำนวนใหม่
+              </button>
+              
+              <button
+                onClick={handleApprove}
+                className="flex items-center justify-center gap-2 px-4 py-3 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-xl transition-colors shadow-sm shadow-emerald-500/30"
+              >
+                <Check size={18} />
+                ถูกต้อง
+              </button>
+            </div>
+
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
