@@ -331,7 +331,7 @@ function ColumnFilterDropdown({ colKey, label, allDocs, activeValues, onChange }
           {options.length > 6 && (
             <div className="px-2 pt-2">
               <input
-                className="w-full text-[10px] px-2 py-1 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-orange-400"
+                className="w-full text-slate-800 bg-white text-[10px] px-2 py-1 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-orange-400"
                 placeholder="Search..."
                 value={search}
                 onChange={e => setSearch(e.target.value)}
@@ -505,7 +505,31 @@ const STAGE_ADVANCE = {
 function RfiCard({ rfi, stage, canAdvance, canEdit, canDelete, onView, onEdit, onAdvance, onDelete }) {
   const isCurrentStage = rfi.stage === stage.id;
   const isDone         = rfi.stage > stage.id;
-  const isOverdue      = rfi.dueDate && rfi.stage < 4 && new Date(rfi.dueDate) < new Date();
+  const overdueTypes = [];
+  if (rfi.requestDateOwner && rfi.stage < 4) {
+    const reqDate = new Date(rfi.requestDateOwner);
+    const isPass = String(rfi.result).toLowerCase() === 'pass';
+    const now = new Date();
+
+    if (isPass && rfi.inspectionDate) {
+      const inspDate = new Date(rfi.inspectionDate);
+      if (inspDate > reqDate) {
+        overdueTypes.push('Overdue Inspect');
+      }
+      if (rfi.stage === 3) {
+        const passPlus7 = new Date(inspDate);
+        passPlus7.setDate(passPlus7.getDate() + 7);
+        if (now > passPlus7) {
+          overdueTypes.push('Overdue Compleate');
+        }
+      }
+    } else if (!isPass) {
+      if (now > reqDate) {
+        overdueTypes.push('Overdue Inspect');
+      }
+    }
+  }
+  const overdueText = overdueTypes.join(', ');
   const concreteAlerts = getConcreteTestAlerts(rfi);
   const stage4CompletedSteps = getStage4CompletedSteps(rfi);
   const stage4ProgressPercent = getStage4ProgressPercent(rfi);
@@ -555,8 +579,8 @@ function RfiCard({ rfi, stage, canAdvance, canEdit, canDelete, onView, onEdit, o
       {/* Primary inspection label */}
       <div className="text-[10px] font-semibold text-slate-700 truncate mb-0.5">{cardInspectionLabel}</div>
 
-      {/* Area - Location */}
-      <div className="text-[9px] text-slate-400 truncate mb-1">{rfi.area} - {rfi.location}</div>
+      {/* Detail Inspection */}
+      <div className="text-[9px] text-slate-400 truncate mb-1" title={rfi.detailInspection}>{rfi.detailInspection}</div>
 
       {/* Stage-specific chips */}
       {stage2Line && (
@@ -636,11 +660,11 @@ function RfiCard({ rfi, stage, canAdvance, canEdit, canDelete, onView, onEdit, o
         )}
       </div>
 
-      {/* Due date + overdue โ€” bottom row */}
-      {rfi.dueDate && (
-        <div className={`flex items-center gap-1 mt-1 text-[9px] ${isOverdue ? 'text-red-500 font-semibold' : 'text-slate-400'}`}>
-          <Clock size={8} /> {rfi.dueDate}
-          {isOverdue && <><AlertTriangle size={8} className="ml-0.5" /> Overdue</>}
+      {/* Request Date (Owner) + overdue — bottom row */}
+      {rfi.requestDateOwner && (
+        <div className={`flex items-center gap-1 mt-1 text-[9px] ${overdueTypes.length > 0 ? 'text-red-500 font-semibold' : 'text-slate-400'}`}>
+          <Clock size={8} /> {rfi.requestDateOwner}
+          {overdueTypes.length > 0 && <><AlertTriangle size={8} className="ml-0.5" /> {overdueText}</>}
         </div>
       )}
     </div>
@@ -924,7 +948,7 @@ export default function RfiPage() {
       'Type': rfi.typeOfInspection,
       'Location': rfi.location,
       'Area': rfi.area,
-      'Due Date': rfi.dueDate || '',
+      'Issue Date': rfi.dueDate || '',
       'Stage': `Stage ${rfi.stage}`,
       'Status Insp.': rfi.statusInsp || '',
       'Status Doc': rfi.statusDoc || '',
@@ -1156,19 +1180,24 @@ export default function RfiPage() {
       {/* โ”€โ”€ TABLE VIEW โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€ */}
       {viewMode === 'table' && (
         <TableColumnVisibility
-          storageKey={`rfi-table-columns:${selectedProjectId || 'all'}`}
+          storageKey={`rfi-table-columns:${userProfile?.uid || userProfile?.email || 'guest'}:${selectedProjectId || 'all'}`}
           tableId="rfi-table"
           columns={RFI_TABLE_COLUMNS}
           className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden p-2 pt-0"
         >
-          <div className="overflow-x-auto">
-            <table data-column-table="rfi-table" className="w-full text-xs">
-              <thead>
-                <tr className="bg-slate-800 text-white">
-                  {RFI_TABLE_COLUMNS.map(h => (
-                    <th key={h.key} className="px-3 py-2 text-left font-semibold whitespace-nowrap text-[10px] tracking-wide">
-                      <div className="flex items-center gap-0.5">
-                        <span>{h.label}</span>
+          {({ columnWidths, setColumnWidth }) => (
+            <div className="overflow-x-auto overflow-y-auto max-h-[65vh]">
+              <table data-column-table="rfi-table" className="w-full text-xs [&_td]:max-w-0 [&_td]:truncate relative">
+                <thead className="sticky top-0 z-30 shadow-sm">
+                  <tr className="bg-slate-800 text-white">
+                    {RFI_TABLE_COLUMNS.map(h => (
+                      <th
+                        key={h.key}
+                        className="relative px-3 py-2 text-left font-semibold whitespace-nowrap text-[10px] tracking-wide"
+                        style={{ width: columnWidths[h.key] || 'auto', minWidth: columnWidths[h.key] || '80px', maxWidth: columnWidths[h.key] || 'auto' }}
+                      >
+                        <div className="flex items-center gap-0.5 pr-2">
+                          <span>{h.label}</span>
                         {FILTERABLE_COLS.includes(h.key) && (
                           <ColumnFilterDropdown
                             colKey={h.key}
@@ -1179,6 +1208,32 @@ export default function RfiPage() {
                           />
                         )}
                       </div>
+                      <div
+                        className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-orange-500 z-10 transition-colors"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          const startX = e.pageX;
+                          const th = e.currentTarget.parentElement;
+                          const startWidth = th.offsetWidth;
+                          
+                          const onMouseMove = (moveEvent) => {
+                            const newWidth = Math.max(50, startWidth + (moveEvent.pageX - startX));
+                            th.style.width = `${newWidth}px`;
+                            th.style.minWidth = `${newWidth}px`;
+                            th.style.maxWidth = `${newWidth}px`;
+                          };
+                          
+                          const onMouseUp = (upEvent) => {
+                            const finalWidth = Math.max(50, startWidth + (upEvent.pageX - startX));
+                            setColumnWidth(h.key, finalWidth);
+                            document.removeEventListener('mousemove', onMouseMove);
+                            document.removeEventListener('mouseup', onMouseUp);
+                          };
+                          
+                          document.addEventListener('mousemove', onMouseMove);
+                          document.addEventListener('mouseup', onMouseUp);
+                        }}
+                      />
                     </th>
                   ))}
                 </tr>
@@ -1364,6 +1419,7 @@ export default function RfiPage() {
               </tbody>
             </table>
           </div>
+          )}
         </TableColumnVisibility>
       )}
 

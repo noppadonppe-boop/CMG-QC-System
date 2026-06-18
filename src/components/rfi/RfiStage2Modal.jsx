@@ -319,7 +319,7 @@ export default function RfiStage2Modal({ rfi, onSave, onSaveDraft, onClose }) {
                   value={stage1Form.requestTimeInternal} onChange={setS1('requestTimeInternal')} />
               </div>
               <div className="flex flex-col gap-0.5">
-                <label className="text-[10px] font-semibold text-slate-500">Due Date</label>
+                <label className="text-[10px] font-semibold text-slate-500">Issue Date</label>
                 <input type="date" className="w-full px-2 py-1.5 text-[11px] border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-400 text-slate-700 bg-white"
                   value={stage1Form.dueDate} onChange={setS1('dueDate')} />
               </div>
@@ -452,7 +452,7 @@ export default function RfiStage2Modal({ rfi, onSave, onSaveDraft, onClose }) {
 
             <div>Request Date (Internal): <span className="font-semibold text-slate-800">{rfi.requestDateInternal || '—'}</span></div>
             <div>Request Time (Internal): <span className="font-semibold text-slate-800">{rfi.requestTimeInternal || '—'}</span></div>
-            <div>Due Date: <span className="font-semibold text-slate-800">{rfi.dueDate || '—'}</span></div>
+            <div>Issue Date: <span className="font-semibold text-slate-800">{rfi.dueDate || '—'}</span></div>
 
             <div>Request Date (Owner): <span className="font-semibold text-slate-800">{rfi.requestDateOwner || '—'}</span></div>
             <div>Request Time (Owner): <span className="font-semibold text-slate-800">{rfi.requestTimeOwner || '—'}</span></div>

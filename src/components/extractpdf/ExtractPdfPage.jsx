@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { FileUp, Send, Trash2, CheckCircle2, XCircle, Loader2, AlertCircle, FileText, FolderOpen, ArrowLeft, Plus, Download, ArrowUp, ArrowDown, X, Pencil, RefreshCw, Check } from 'lucide-react';
+import { FileUp, Send, Trash2, CheckCircle2, XCircle, Loader2, AlertCircle, FileText, FolderOpen, ArrowLeft, Plus, Download, ArrowUp, ArrowDown, X, Pencil, RefreshCw, Check, ZoomIn, ZoomOut, Maximize, Expand } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { PDFDocument } from 'pdf-lib';
 import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject, getBlob } from 'firebase/storage';
@@ -1461,16 +1461,131 @@ export default function ExtractPdfPage() {
 
 // ── Review Modal Component ──────────────────────────────────────────────────────────
 function ReviewModal({ row, onClose, updateRow }) {
-  const scrollRef = useRef(null);
+  const containerRef = useRef(null);
+  const canvasRef = useRef(null);
+  
+  // Viewer state
+  const [scale, setScale] = useState(1);
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [isLoading, setIsLoading] = useState(true);
+  const [highResImageUrl, setHighResImageUrl] = useState(null);
 
-  // เลื่อน scroll ไปที่มุมขวาล่างทันทีที่เปิด
+  // Render PDF page to high-res image
   useEffect(() => {
-    if (scrollRef.current) {
-      const el = scrollRef.current;
-      el.scrollTop = el.scrollHeight;
-      el.scrollLeft = el.scrollWidth;
+    let isMounted = true;
+    
+    const renderPdf = async () => {
+      if (!row || !row.pdfUrl) return;
+      setIsLoading(true);
+      try {
+        // Fetch the PDF file
+        const response = await fetch(row.pdfUrl);
+        const arrayBuffer = await response.arrayBuffer();
+        
+        // Load the PDF document
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        const page = await pdf.getPage(row.page);
+        
+        // Render at a high scale (e.g., 3x for high resolution)
+        const renderScale = 3;
+        const viewport = page.getViewport({ scale: renderScale });
+        
+        const canvas = document.createElement('canvas');
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        await page.render({ canvasContext: ctx, viewport }).promise;
+        
+        if (isMounted) {
+          setHighResImageUrl(canvas.toDataURL('image/jpeg', 0.9));
+          setIsLoading(false);
+        }
+      } catch (error) {
+        console.error('Error rendering high-res PDF page:', error);
+        if (isMounted) {
+          setIsLoading(false);
+        }
+      }
+    };
+    
+    renderPdf();
+    
+    return () => {
+      isMounted = false;
+    };
+  }, [row]);
+
+  // Handle zoom and fit
+  const handleZoomIn = () => setScale(s => Math.min(s + 0.25, 5));
+  const handleZoomOut = () => setScale(s => Math.max(s - 0.25, 0.1));
+  const handleReset = () => {
+    setScale(1);
+    setPosition({ x: 0, y: 0 });
+  };
+  const handleFitWidth = () => {
+    if (containerRef.current && canvasRef.current) {
+      const containerWidth = containerRef.current.clientWidth - 40; // padding
+      const imageWidth = canvasRef.current.naturalWidth;
+      const newScale = containerWidth / imageWidth;
+      setScale(newScale);
+      setPosition({ x: 0, y: 0 });
+    }
+  };
+  const handleFitPage = () => {
+    if (containerRef.current && canvasRef.current) {
+      const containerHeight = containerRef.current.clientHeight - 40;
+      const imageHeight = canvasRef.current.naturalHeight;
+      const newScale = containerHeight / imageHeight;
+      setScale(newScale);
+      setPosition({ x: 0, y: 0 });
+    }
+  };
+
+  // Mouse wheel zoom
+  const handleWheel = (e) => {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      const zoomSensitivity = 0.001;
+      const delta = -e.deltaY * zoomSensitivity;
+      setScale(s => Math.min(Math.max(s + delta, 0.1), 5));
+    }
+  };
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (container) {
+      container.addEventListener('wheel', handleWheel, { passive: false });
+      return () => container.removeEventListener('wheel', handleWheel);
     }
   }, []);
+
+  // Drag to pan
+  const handleMouseDown = (e) => {
+    e.preventDefault();
+    setIsDragging(true);
+    setDragStart({ x: e.clientX - position.x, y: e.clientY - position.y });
+  };
+
+  const handleMouseMove = (e) => {
+    if (!isDragging) return;
+    setPosition({
+      x: e.clientX - dragStart.x,
+      y: e.clientY - dragStart.y
+    });
+  };
+
+  const handleMouseUp = () => {
+    setIsDragging(false);
+  };
+  const handleMouseLeave = () => {
+    setIsDragging(false);
+  };
 
   if (!row) return null;
 
@@ -1478,7 +1593,7 @@ function ReviewModal({ row, onClose, updateRow }) {
     updateRow(row.id, 'dwgNo', '');
     updateRow(row.id, 'title', '');
     updateRow(row.id, 'rev', '');
-    updateRow(row.id, 'calcStatus', 'WAITING');
+    updateRow(row.id, 'calcStatus', CALC_STATUS.WAITING);
     updateRow(row.id, 'isApproved', false);
     onClose();
   };
@@ -1494,60 +1609,101 @@ function ReviewModal({ row, onClose, updateRow }) {
         className="absolute inset-0 bg-slate-900/70 backdrop-blur-sm" 
         onClick={onClose} 
       />
-      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-5xl flex flex-col h-[85vh] overflow-hidden">
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-6xl flex flex-col h-[90vh] overflow-hidden">
         
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-white">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-white z-10">
           <div>
-            <h3 className="text-base font-bold text-slate-800">ตรวจสอบความถูกต้อง (หน้า {row.page})</h3>
-            <p className="text-xs text-slate-500 mt-0.5">คุณสามารถซูมและเลื่อนดูรายละเอียดจากรูปต้นฉบับได้</p>
+            <h3 className="text-lg font-bold text-slate-800">ตรวจสอบความถูกต้อง (หน้า {row.page})</h3>
+            <p className="text-sm text-slate-500 mt-0.5">คุณสามารถซูมและเลื่อนดูรายละเอียดจากรูปต้นฉบับได้</p>
           </div>
           <button 
             onClick={onClose}
             className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
           >
-            <X size={20} />
+            <X size={24} />
           </button>
         </div>
 
         {/* Content - 2 Columns */}
         <div className="flex flex-1 overflow-hidden bg-slate-50">
           
-          {/* Left Column (Image Viewer) - 60% */}
-          <div className="w-3/5 border-r border-slate-200 relative bg-slate-100 overflow-hidden flex flex-col">
-            <div className="absolute top-3 left-3 z-10 bg-black/60 text-white px-2 py-1 rounded text-[10px] font-mono shadow">
-              100% Zoom (Bottom-Right Focused)
-            </div>
+          {/* Left Column (Interactive Image Viewer) - 70% */}
+          <div className="w-[70%] border-r border-slate-200 relative bg-slate-100 flex flex-col overflow-hidden">
             
+            {/* Toolbar */}
+            <div className="flex items-center justify-between px-4 py-2 bg-white border-b border-slate-200 shadow-sm z-10">
+              <div className="flex items-center space-x-1">
+                <button onClick={handleZoomOut} className="p-1.5 hover:bg-slate-100 rounded text-slate-600" title="Zoom Out"><ZoomOut size={18} /></button>
+                <span className="text-xs font-mono w-12 text-center text-slate-600">{Math.round(scale * 100)}%</span>
+                <button onClick={handleZoomIn} className="p-1.5 hover:bg-slate-100 rounded text-slate-600" title="Zoom In"><ZoomIn size={18} /></button>
+              </div>
+              <div className="flex items-center space-x-2 border-l border-slate-200 pl-3">
+                <button onClick={handleFitWidth} className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded" title="Fit Width">
+                  <Expand size={14} /> Fit Width
+                </button>
+                <button onClick={handleFitPage} className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded" title="Fit Page">
+                  <Maximize size={14} /> Fit Page
+                </button>
+                <button onClick={handleReset} className="px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded" title="Reset Zoom & Pan">
+                  Reset
+                </button>
+              </div>
+            </div>
+
+            {/* Viewport */}
             <div 
-              ref={scrollRef}
-              className="flex-1 overflow-auto custom-scrollbar"
-              style={{ padding: '20px' }}
+              ref={containerRef}
+              className={`flex-1 relative overflow-hidden bg-slate-200/50 ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onMouseLeave={handleMouseLeave}
             >
-              {row.thumbnail ? (
-                <div className="min-w-fit min-h-fit bg-white shadow-sm border border-slate-200 rounded">
+              {isLoading ? (
+                <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 bg-slate-100/50">
+                  <Loader2 size={32} className="animate-spin mb-3 text-blue-500" />
+                  <p className="text-sm font-medium">กำลังโหลดเอกสารความละเอียดสูง...</p>
+                </div>
+              ) : highResImageUrl ? (
+                <div 
+                  className="absolute origin-center transition-transform duration-100 ease-out flex items-center justify-center"
+                  style={{ 
+                    transform: `translate(${position.x}px, ${position.y}px) scale(${scale})`,
+                    left: '50%',
+                    top: '50%',
+                    width: '0',
+                    height: '0',
+                  }}
+                >
                   <img 
-                    src={row.thumbnail} 
+                    ref={canvasRef}
+                    src={highResImageUrl} 
                     alt={`Page ${row.page}`}
-                    className="max-w-none block"
-                    style={{ width: 'auto', height: 'auto', transform: 'scale(1)', transformOrigin: 'top left' }}
+                    className="max-w-none shadow-xl border border-slate-200 bg-white pointer-events-none select-none"
+                    style={{ 
+                      transform: 'translate(-50%, -50%)',
+                      width: 'auto',
+                      height: 'auto',
+                    }}
+                    onLoad={handleFitWidth}
                   />
                 </div>
               ) : (
-                <div className="h-full flex flex-col items-center justify-center text-slate-400">
-                  <Loader2 size={32} className="animate-spin mb-2" />
-                  <p className="text-sm">กำลังโหลดรูปภาพ...</p>
+                <div className="absolute inset-0 flex flex-col items-center justify-center text-red-400">
+                  <AlertCircle size={32} className="mb-2" />
+                  <p className="text-sm">ไม่สามารถโหลดเอกสารได้</p>
                 </div>
               )}
             </div>
           </div>
 
-          {/* Right Column (Data Fields) - 40% */}
-          <div className="w-2/5 bg-white p-6 flex flex-col justify-between overflow-y-auto">
-            <div className="space-y-5">
+          {/* Right Column (Data Fields) - 30% */}
+          <div className="w-[30%] bg-white p-6 flex flex-col justify-between overflow-y-auto">
+            <div className="space-y-6">
               
               {/* Field: DWG NO */}
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider flex items-center justify-between">
                   DWG NO.
                   <Pencil size={12} className="text-slate-300" />
@@ -1558,13 +1714,13 @@ function ReviewModal({ row, onClose, updateRow }) {
                     value={row.dwgNo || ''}
                     onChange={e => updateRow(row.id, 'dwgNo', e.target.value)}
                     placeholder="DWG-XXXX"
-                    className="w-full rounded-lg border-2 border-slate-200 px-4 py-2.5 text-sm font-medium shadow-sm transition-colors focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/10 group-hover:border-blue-300"
+                    className="w-full rounded-xl border-2 border-slate-200 px-4 py-3 text-sm font-medium shadow-sm transition-all focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/10 hover:border-blue-300"
                   />
                 </div>
               </div>
 
               {/* Field: TITLE */}
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider flex items-center justify-between">
                   TITLE
                   <Pencil size={12} className="text-slate-300" />
@@ -1575,13 +1731,13 @@ function ReviewModal({ row, onClose, updateRow }) {
                     value={row.title || ''}
                     onChange={e => updateRow(row.id, 'title', e.target.value)}
                     placeholder="Drawing Title"
-                    className="w-full rounded-lg border-2 border-slate-200 px-4 py-2.5 text-sm font-medium shadow-sm transition-colors focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/10 group-hover:border-blue-300"
+                    className="w-full rounded-xl border-2 border-slate-200 px-4 py-3 text-sm font-medium shadow-sm transition-all focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/10 hover:border-blue-300"
                   />
                 </div>
               </div>
 
               {/* Field: REV */}
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider flex items-center justify-between">
                   REV.
                   <Pencil size={12} className="text-slate-300" />
@@ -1592,7 +1748,7 @@ function ReviewModal({ row, onClose, updateRow }) {
                     value={row.rev || ''}
                     onChange={e => updateRow(row.id, 'rev', e.target.value)}
                     placeholder="A0"
-                    className="w-full rounded-lg border-2 border-slate-200 px-4 py-2.5 text-sm font-medium shadow-sm transition-colors focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/10 group-hover:border-blue-300"
+                    className="w-full rounded-xl border-2 border-slate-200 px-4 py-3 text-sm font-medium shadow-sm transition-all focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/10 hover:border-blue-300"
                   />
                 </div>
               </div>
@@ -1600,10 +1756,10 @@ function ReviewModal({ row, onClose, updateRow }) {
             </div>
 
             {/* Bottom Actions */}
-            <div className="grid grid-cols-2 gap-3 mt-8 pt-4 border-t border-slate-100">
+            <div className="grid grid-cols-2 gap-3 mt-8 pt-6 border-t border-slate-100">
               <button
                 onClick={handleRecalculate}
-                className="flex items-center justify-center gap-2 px-4 py-3 bg-amber-50 hover:bg-amber-100 text-amber-700 font-bold rounded-xl transition-colors border border-amber-200"
+                className="flex items-center justify-center gap-2 px-4 py-3.5 bg-amber-50 hover:bg-amber-100 text-amber-700 font-bold rounded-xl transition-colors border border-amber-200"
               >
                 <RefreshCw size={16} />
                 คำนวนใหม่
@@ -1611,7 +1767,7 @@ function ReviewModal({ row, onClose, updateRow }) {
               
               <button
                 onClick={handleApprove}
-                className="flex items-center justify-center gap-2 px-4 py-3 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-xl transition-colors shadow-sm shadow-emerald-500/30"
+                className="flex items-center justify-center gap-2 px-4 py-3.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-xl transition-all shadow-sm shadow-emerald-500/30 hover:shadow-md hover:shadow-emerald-500/40"
               >
                 <Check size={18} />
                 ถูกต้อง

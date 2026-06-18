@@ -13,6 +13,18 @@ function readStorageArray(storageKey, fallback = []) {
   }
 }
 
+function readStorageObject(storageKey, fallback = {}) {
+  if (typeof window === 'undefined') return fallback;
+  try {
+    const raw = window.localStorage.getItem(storageKey);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw);
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? parsed : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 function mergeOrderWithColumns(columns, storedOrder) {
   const columnKeys = columns.map(col => col.key);
   const known = storedOrder.filter(key => columnKeys.includes(key));
@@ -22,6 +34,7 @@ function mergeOrderWithColumns(columns, storedOrder) {
 
 export function useColumnVisibility(storageKey, columns) {
   const orderKey = `${storageKey}:order`;
+  const widthKey = `${storageKey}:width`;
   const lockedKeys = useMemo(() => columns.filter(col => col.locked).map(col => col.key), [columns]);
   const defaultHidden = useMemo(() => columns.filter(col => col.defaultHidden).map(col => col.key), [columns]);
 
@@ -33,6 +46,7 @@ export function useColumnVisibility(storageKey, columns) {
     const stored = readStorageArray(orderKey, columns.map(col => col.key));
     return mergeOrderWithColumns(columns, stored);
   });
+  const [columnWidths, setColumnWidths] = useState(() => readStorageObject(widthKey, {}));
 
   useEffect(() => {
     setHiddenKeys(prev => prev.filter(key => columns.some(col => col.key === key && !col.locked)));
@@ -48,6 +62,11 @@ export function useColumnVisibility(storageKey, columns) {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem(orderKey, JSON.stringify(orderedKeys));
   }, [orderedKeys, orderKey]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(widthKey, JSON.stringify(columnWidths));
+  }, [columnWidths, widthKey]);
 
   const hiddenSet = useMemo(() => new Set(hiddenKeys), [hiddenKeys]);
   const orderedColumns = useMemo(() => {
@@ -85,6 +104,11 @@ export function useColumnVisibility(storageKey, columns) {
   function reset() {
     setHiddenKeys(defaultHidden.filter(key => !lockedKeys.includes(key)));
     setOrderedKeys(columns.map(col => col.key));
+    setColumnWidths({});
+  }
+
+  function setColumnWidth(key, width) {
+    setColumnWidths(prev => ({ ...prev, [key]: Math.max(50, width) }));
   }
 
   return {
@@ -98,6 +122,8 @@ export function useColumnVisibility(storageKey, columns) {
     toggle,
     moveColumn,
     reset,
+    columnWidths,
+    setColumnWidth,
   };
 }
 
@@ -111,7 +137,7 @@ export default function TableColumnVisibility({
   const menuRef = useRef(null);
   const [open, setOpen] = useState(false);
   const [draggingKey, setDraggingKey] = useState('');
-  const { columns: allColumns, orderedKeys, orderedColumns, visibleColumns, hiddenSet, visibleCount, totalCount, toggle, moveColumn, reset } =
+  const { columns: allColumns, orderedKeys, orderedColumns, visibleColumns, hiddenSet, visibleCount, totalCount, toggle, moveColumn, reset, columnWidths, setColumnWidth } =
     useColumnVisibility(storageKey, columns);
 
   useEffect(() => {
@@ -226,7 +252,7 @@ export default function TableColumnVisibility({
         )}
       </div>
       <div className={className}>
-        {typeof children === 'function' ? children({ visibleColumns, orderedColumns, tableId }) : children}
+        {typeof children === 'function' ? children({ visibleColumns, orderedColumns, tableId, columnWidths, setColumnWidth }) : children}
       </div>
     </div>
   );

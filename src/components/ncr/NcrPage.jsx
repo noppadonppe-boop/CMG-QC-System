@@ -30,7 +30,7 @@ const TYPE_BADGE = {
 
 const NCR_TABLE_COLUMNS = [
   { key: 'row', label: '#' },
-  { key: 'ncrNo', label: 'NCR No.' },
+  { key: 'ncrNo', label: 'Record No.' },
   { key: 'issueDate', label: 'Issue Date' },
   { key: 'type', label: 'Type' },
   { key: 'category', label: 'Category' },
@@ -42,7 +42,27 @@ const NCR_TABLE_COLUMNS = [
   { key: 'actions', label: 'Actions', locked: true },
 ];
 
-function ConfirmDelete({ item, onConfirm, onCancel }) {
+const CAR_TABLE_COLUMNS = [
+  { key: 'row', label: '#' },
+  { key: 'ncrNo', label: 'No' },
+  { key: 'projectId', label: 'PROJECT' },
+  { key: 'month', label: 'Month' },
+  { key: 'type', label: 'Type' },
+  { key: 'description', label: 'Description' },
+  { key: 'owner', label: 'Owner' },
+  { key: 'dueDate', label: 'Due Date' },
+  { key: 'closeDate', label: 'Close Date' },
+  { key: 'status', label: 'Status' },
+  { key: 'reopen', label: 'Reopen?' },
+  { key: 'recurrence', label: 'Recurrence?' },
+  { key: 'slaDays', label: 'SLA_Days' },
+  { key: 'closedOnTime', label: 'Closed_On_Time' },
+  { key: 'attOpen', label: 'แนบเอกสารเปิด' },
+  { key: 'attClose', label: 'แนบเอกสารปิด NCR' },
+  { key: 'actions', label: 'Actions', locked: true },
+];
+
+function ConfirmDelete({ item, activeTab = 'NCR', onConfirm, onCancel }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={onCancel} />
@@ -52,7 +72,7 @@ function ConfirmDelete({ item, onConfirm, onCancel }) {
             <Trash2 size={18} className="text-red-600" />
           </div>
           <div>
-            <h3 className="text-sm font-bold text-slate-800">Delete NCR?</h3>
+            <h3 className="text-sm font-bold text-slate-800">Delete {activeTab}?</h3>
             <p className="text-xs text-slate-500 mt-0.5">This action cannot be undone.</p>
           </div>
         </div>
@@ -80,6 +100,7 @@ export default function NcrPage() {
   const [modalMode,    setModalMode]    = useState(null);
   const [editTarget,   setEditTarget]   = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [activeTab,    setActiveTab]    = useState('Observation');
   const [expandRow,    setExpandRow]    = useState(null);
 
   const canAddNcr    = canAction('ncr', 'addNcr');
@@ -96,12 +117,13 @@ export default function NcrPage() {
       (n.actionToClose || '').toLowerCase().includes(search.toLowerCase());
     const matchStatus = !filterStatus || n.status === filterStatus;
     const matchType   = !filterType   || n.type   === filterType;
-    return matchSearch && matchStatus && matchType;
+    const matchTab    = (n.recordType || 'NCR') === activeTab;
+    return matchSearch && matchStatus && matchType && matchTab;
   });
 
   function handleSave(form) {
     if (modalMode === 'add') {
-      addNcr({ ...form, id: `ncr-${Date.now()}`, projectId: selectedProjectId });
+      addNcr({ ...form, id: `ncr-${Date.now()}`, projectId: selectedProjectId, recordType: activeTab });
     } else {
       updateNcr(editTarget.id, form);
     }
@@ -109,13 +131,15 @@ export default function NcrPage() {
     setEditTarget(null);
   }
 
+  const activeTabItems = projectItems.filter(n => (n.recordType || 'NCR') === activeTab);
+
   const counts = {
-    total:      projectItems.length,
-    open:       projectItems.filter(n => n.status === 'Open').length,
-    inProgress: projectItems.filter(n => n.status === 'In Progress').length,
-    comment:    projectItems.filter(n => n.status === 'With Comment').length,
-    reject:     projectItems.filter(n => n.status === 'Reject').length,
-    close:      projectItems.filter(n => n.status === 'Close').length,
+    total:      activeTabItems.length,
+    open:       activeTabItems.filter(n => n.status === 'Open').length,
+    inProgress: activeTabItems.filter(n => n.status === 'In Progress').length,
+    comment:    activeTabItems.filter(n => n.status === 'With Comment').length,
+    reject:     activeTabItems.filter(n => n.status === 'Reject').length,
+    close:      activeTabItems.filter(n => n.status === 'Close').length,
   };
 
   return (
@@ -123,8 +147,8 @@ export default function NcrPage() {
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-xl font-bold text-slate-800">NCR Management</h1>
-          <p className="text-sm text-slate-500 mt-0.5">{selectedProject?.name} — Non-Conformance Reports</p>
+          <h1 className="text-xl font-bold text-slate-800">Quality Findings</h1>
+          <p className="text-sm text-slate-500 mt-0.5">{selectedProject?.name} — Track observations, CARs, and NCRs</p>
         </div>
         {canAddNcr && (
           <button
@@ -132,9 +156,46 @@ export default function NcrPage() {
             className="flex items-center gap-2 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold rounded-lg transition-colors shadow-sm"
           >
             <Plus size={15} />
-            Raise NCR
+            Raise {activeTab}
           </button>
         )}
+      </div>
+
+      {/* Tabs */}
+      <div className="flex items-center gap-3">
+        {[
+          { 
+            id: 'Observation', 
+            label: 'Observation', 
+            active: 'bg-emerald-100 border-emerald-300 text-emerald-800 shadow-sm ring-1 ring-emerald-400',
+            inactive: 'bg-white border-slate-200 text-slate-500 hover:bg-emerald-50 hover:text-emerald-600 hover:border-emerald-200'
+          },
+          { 
+            id: 'CAR', 
+            label: 'CAR (Corrective Action Request)', 
+            active: 'bg-amber-100 border-amber-300 text-amber-800 shadow-sm ring-1 ring-amber-400',
+            inactive: 'bg-white border-slate-200 text-slate-500 hover:bg-amber-50 hover:text-amber-600 hover:border-amber-200'
+          },
+          { 
+            id: 'NCR', 
+            label: 'NCR (Non-Conformance Report)', 
+            active: 'bg-rose-100 border-rose-300 text-rose-800 shadow-sm ring-1 ring-rose-400',
+            inactive: 'bg-white border-slate-200 text-slate-500 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200'
+          }
+        ].map(tab => {
+          const isActive = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`px-4 py-2 text-xs font-bold transition-all rounded-xl border ${
+                isActive ? tab.active : tab.inactive
+              }`}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
       </div>
 
       {/* Summary cards */}
@@ -200,25 +261,31 @@ export default function NcrPage() {
 
       {/* Table */}
       <TableColumnVisibility
-        storageKey="ncr-table-columns"
+        storageKey={`ncr-table-columns-${activeTab}`}
         tableId="ncr-table"
-        columns={NCR_TABLE_COLUMNS}
+        columns={activeTab === 'CAR' ? CAR_TABLE_COLUMNS : NCR_TABLE_COLUMNS}
         className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden p-4 pt-3"
       >
         <div className="overflow-x-auto">
           <table data-column-table="ncr-table" className="w-full text-xs">
             <thead>
               <tr className="bg-slate-800 text-white">
-                {['#', 'NCR No.', 'Issue Date', 'Type', 'Category', 'Description', 'Assigned To', 'Action to Close', 'Attachment', 'Status', (canEditNcr || canDeleteNcr) ? 'Actions' : ''].filter(Boolean).map(h => (
-                  <th key={h} className="px-4 py-3 text-left font-semibold whitespace-nowrap text-[11px] tracking-wide">{h}</th>
-                ))}
+                {activeTab === 'CAR' ? (
+                  ['#', 'No', 'PROJECT', 'Month', 'Type', 'Description', 'Owner', 'Due Date', 'Close Date', 'Status', 'Reopen?', 'Recurrence?', 'SLA_Days', 'Closed_On_Time', 'แนบเอกสารเปิด', 'แนบเอกสารปิด NCR', (canEditNcr || canDeleteNcr) ? 'Actions' : ''].filter(Boolean).map(h => (
+                    <th key={h} className="px-4 py-3 text-left font-semibold whitespace-nowrap text-[11px] tracking-wide">{h}</th>
+                  ))
+                ) : (
+                  ['#', `${activeTab} No.`, 'Issue Date', 'Type', 'Category', 'Description', 'Assigned To', 'Action to Close', 'Attachment', 'Status', (canEditNcr || canDeleteNcr) ? 'Actions' : ''].filter(Boolean).map(h => (
+                    <th key={h} className="px-4 py-3 text-left font-semibold whitespace-nowrap text-[11px] tracking-wide">{h}</th>
+                  ))
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
               {filtered.length === 0 && (
                 <tr>
                   <td colSpan={11} className="px-4 py-12 text-center text-slate-400">
-                    No NCR records for <span className="font-semibold">{selectedProject?.name}</span>.
+                    No {activeTab} records for <span className="font-semibold">{selectedProject?.name}</span>.
                   </td>
                 </tr>
               )}
@@ -231,52 +298,95 @@ export default function NcrPage() {
                   >
                     <td className="px-4 py-3 text-slate-400 font-mono text-[11px]">{idx + 1}</td>
                     <td className="px-4 py-3 font-mono font-bold text-rose-700 whitespace-nowrap">{item.ncrNo}</td>
-                    <td className="px-4 py-3 text-slate-500 whitespace-nowrap font-mono text-[11px]">{item.issueDate || '—'}</td>
-                    <td className="px-4 py-3">
-                      <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full whitespace-nowrap ${TYPE_BADGE[item.type] || 'bg-slate-100 text-slate-600'}`}>
-                        {item.type}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="text-[11px] text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full whitespace-nowrap">
-                        {item.category || '—'}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 max-w-[180px]">
-                      <div className="text-[11px] text-slate-700 font-medium truncate" title={item.description}>
-                        {item.description || '—'}
-                      </div>
-                      {item.location && (
-                        <div className="text-[10px] text-slate-400 mt-0.5 truncate">{item.location}</div>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{item.assignedTo || '—'}</td>
-                    <td className="px-4 py-3 max-w-[200px]">
-                      <div className="text-[11px] text-slate-500 truncate" title={item.actionToClose}>
-                        {item.actionToClose || '—'}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      {item.attDocument ? (
-                        <a
-                          href={item.attDocument}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={e => e.stopPropagation()}
-                          className="flex items-center gap-1 text-[11px] text-blue-600 hover:text-blue-800 whitespace-nowrap"
-                        >
-                          <ExternalLink size={11} /> View
-                        </a>
-                      ) : (
-                        <span className="text-[11px] text-slate-300">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full w-fit whitespace-nowrap ${STATUS_BADGE[item.status] || 'bg-slate-100 text-slate-500'}`}>
-                        <span>{STATUS_ICON[item.status]}</span>
-                        {item.status}
-                      </span>
-                    </td>
+                    
+                    {activeTab === 'CAR' ? (
+                      <>
+                        <td className="px-4 py-3 text-slate-600 whitespace-nowrap text-[11px]">{selectedProject?.name || '—'}</td>
+                        <td className="px-4 py-3 text-slate-600 whitespace-nowrap text-[11px]">{item.month || '—'}</td>
+                        <td className="px-4 py-3">
+                          <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full whitespace-nowrap ${TYPE_BADGE[item.type] || 'bg-slate-100 text-slate-600'}`}>
+                            {item.type}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 max-w-[180px]">
+                          <div className="text-[11px] text-slate-700 font-medium truncate" title={item.description}>
+                            {item.description || '—'}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-slate-600 whitespace-nowrap text-[11px]">{item.owner || item.assignedTo || '—'}</td>
+                        <td className="px-4 py-3 text-slate-500 whitespace-nowrap font-mono text-[11px]">{item.dueDate || '—'}</td>
+                        <td className="px-4 py-3 text-slate-500 whitespace-nowrap font-mono text-[11px]">{item.closeDate || '—'}</td>
+                        <td className="px-4 py-3">
+                          <span className={`flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full w-fit whitespace-nowrap ${STATUS_BADGE[item.status] || 'bg-slate-100 text-slate-500'}`}>
+                            <span>{STATUS_ICON[item.status]}</span>
+                            {item.status}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-slate-600 whitespace-nowrap text-[11px]">{item.reopen || 'No'}</td>
+                        <td className="px-4 py-3 text-slate-600 whitespace-nowrap text-[11px]">{item.recurrence || 'No'}</td>
+                        <td className="px-4 py-3 text-slate-600 whitespace-nowrap text-[11px]">{item.slaDays || '—'}</td>
+                        <td className="px-4 py-3 text-slate-600 whitespace-nowrap text-[11px]">{item.closedOnTime || 'N/A'}</td>
+                        <td className="px-4 py-3">
+                          {item.attOpen ? (
+                            <a href={item.attOpen} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="flex items-center gap-1 text-[11px] text-blue-600 hover:text-blue-800 whitespace-nowrap"><ExternalLink size={11} /> View</a>
+                          ) : <span className="text-[11px] text-slate-300">—</span>}
+                        </td>
+                        <td className="px-4 py-3">
+                          {item.attClose ? (
+                            <a href={item.attClose} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="flex items-center gap-1 text-[11px] text-blue-600 hover:text-blue-800 whitespace-nowrap"><ExternalLink size={11} /> View</a>
+                          ) : <span className="text-[11px] text-slate-300">—</span>}
+                        </td>
+                      </>
+                    ) : (
+                      <>
+                        <td className="px-4 py-3 text-slate-500 whitespace-nowrap font-mono text-[11px]">{item.issueDate || '—'}</td>
+                        <td className="px-4 py-3">
+                          <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full whitespace-nowrap ${TYPE_BADGE[item.type] || 'bg-slate-100 text-slate-600'}`}>
+                            {item.type}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="text-[11px] text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full whitespace-nowrap">
+                            {item.category || '—'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 max-w-[180px]">
+                          <div className="text-[11px] text-slate-700 font-medium truncate" title={item.description}>
+                            {item.description || '—'}
+                          </div>
+                          {item.location && (
+                            <div className="text-[10px] text-slate-400 mt-0.5 truncate">{item.location}</div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{item.assignedTo || '—'}</td>
+                        <td className="px-4 py-3 max-w-[200px]">
+                          <div className="text-[11px] text-slate-500 truncate" title={item.actionToClose}>
+                            {item.actionToClose || '—'}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          {item.attDocument ? (
+                            <a
+                              href={item.attDocument}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={e => e.stopPropagation()}
+                              className="flex items-center gap-1 text-[11px] text-blue-600 hover:text-blue-800 whitespace-nowrap"
+                            >
+                              <ExternalLink size={11} /> View
+                            </a>
+                          ) : (
+                            <span className="text-[11px] text-slate-300">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={`flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full w-fit whitespace-nowrap ${STATUS_BADGE[item.status] || 'bg-slate-100 text-slate-500'}`}>
+                            <span>{STATUS_ICON[item.status]}</span>
+                            {item.status}
+                          </span>
+                        </td>
+                      </>
+                    )}
                     {(canEditNcr || canDeleteNcr) && (
                       <td className="px-4 py-3">
                         <div
@@ -340,8 +450,8 @@ export default function NcrPage() {
         {filtered.length > 0 && (
           <div className="px-4 py-2.5 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
             <span className="text-[11px] text-slate-500">
-              {filtered.length} NCR{filtered.length !== 1 ? 's' : ''} shown
-              {(search || filterStatus || filterType) ? ` (filtered from ${projectItems.length})` : ''}
+              {filtered.length} {activeTab}{filtered.length !== 1 ? 's' : ''} shown
+              {(search || filterStatus || filterType) ? ` (filtered from ${activeTabItems.length})` : ''}
             </span>
             <div className="flex items-center gap-3 text-[11px]">
               <span className="text-red-600 font-semibold">🔴 {counts.open} Open</span>
@@ -355,6 +465,7 @@ export default function NcrPage() {
       {(modalMode === 'add' || modalMode === 'edit') && (
         <NcrModal
           item={modalMode === 'edit' ? editTarget : null}
+          activeTab={activeTab}
           onSave={handleSave}
           onClose={() => { setModalMode(null); setEditTarget(null); }}
         />
@@ -362,6 +473,7 @@ export default function NcrPage() {
       {deleteTarget && (
         <ConfirmDelete
           item={deleteTarget}
+          activeTab={activeTab}
           onConfirm={() => { deleteNcr(deleteTarget.id); setDeleteTarget(null); }}
           onCancel={() => setDeleteTarget(null)}
         />

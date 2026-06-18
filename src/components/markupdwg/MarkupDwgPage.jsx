@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { pdfjs } from 'react-pdf';
+import * as pdfjsLib from 'pdfjs-dist';
 import {
   Upload, FileText, Edit2, Save, X, Loader2,
   Trash2, ArrowUp, ArrowDown, RefreshCw, ZoomIn, ZoomOut, Plus, Building2, Folder, FolderPlus
@@ -9,10 +9,7 @@ import { ref as storageRef, uploadBytesResumable, getDownloadURL } from 'firebas
 import { useMenuPermissions } from '../../auth/useMenuPermissions';
 import { useApp } from '../../context/AppContext';
 
-pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.min.mjs',
-  import.meta.url,
-).toString();
+pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
 
 function createId(prefix = 'markup-page') {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -61,8 +58,8 @@ function PageCard({ page, index, isEditMode, onMoveUp, onMoveDown, onDelete, onR
     <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
       <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
         <div className="min-w-0">
-          <div className="text-sm font-bold text-slate-800">{pageLabel}</div>
-          <div className="text-[11px] text-slate-500 truncate">{page.name || `Page ${index + 1}`}</div>
+          <div className="text-sm font-bold text-slate-800 truncate">{page.name || `Page ${index + 1}`}</div>
+          <div className="text-[11px] text-slate-500">Upload Date: {pageLabel}</div>
         </div>
         {isEditMode && (
           <div className="flex items-center gap-2">
@@ -359,7 +356,10 @@ export default function MarkupDwgPage() {
     if (!selectedProject || !activeBuilding || !activeGroup) return [];
 
     const data = new Uint8Array(await pdfFile.arrayBuffer());
-    const pdf = await pdfjs.getDocument({ data }).promise;
+    const pdf = await pdfjsLib.getDocument({ 
+      data,
+      standardFontDataUrl: `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/standard_fonts/`,
+    }).promise;
     const pages = [];
 
     for (let i = 1; i <= pdf.numPages; i += 1) {
@@ -501,7 +501,7 @@ export default function MarkupDwgPage() {
       closeUploadModal();
     } catch (error) {
       console.error('Failed to upload markup file:', error);
-      alert('Failed to upload and create markup pages.');
+      alert(`Failed to upload and create markup pages. Error: ${error?.message || error}`);
     } finally {
       setBusyLabel('');
       setBusyProgress(0);

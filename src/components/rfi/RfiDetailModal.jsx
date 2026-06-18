@@ -127,7 +127,7 @@ export default function RfiDetailModal({ rfi, onClose }) {
           <Field label="Type of Inspection" value={rfi.typeOfInspection} />
           <Field label="Request Date (Internal)"  value={rfi.requestDateInternal} />
           <Field label="Request Time (Internal)"  value={rfi.requestTimeInternal} />
-          <Field label="Due Date"         value={rfi.dueDate} />
+          <Field label="Issue Date"         value={rfi.dueDate} />
           <Field label="Request Date (Owner)"     value={rfi.requestDateOwner} />
           <Field label="Request Time (Owner)"     value={rfi.requestTimeOwner} />
           <div className="col-span-3">

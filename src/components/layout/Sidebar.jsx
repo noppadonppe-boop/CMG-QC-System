@@ -50,7 +50,7 @@ const NAV_ITEMS = [
   },
   {
     id: 'ncr',
-    label: 'NCR Management',
+    label: 'Quality Findings',
     icon: AlertTriangle,
     roles: ['QcDocCenter'],
   },

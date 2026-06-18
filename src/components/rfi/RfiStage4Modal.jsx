@@ -734,7 +734,7 @@ export default function RfiStage4Modal({ rfi, onSave, onClose }) {
               <FormField label="Request Time (Internal)">
                 <Input type="time" value={revisionForm.requestTimeInternal} onChange={setRevisionField('requestTimeInternal')} />
               </FormField>
-              <FormField label="Due Date">
+              <FormField label="Issue Date">
                 <Input type="date" value={revisionForm.dueDate} onChange={setRevisionField('dueDate')} />
               </FormField>
               <FormField label="Request Date (Owner)">
@@ -797,7 +797,7 @@ export default function RfiStage4Modal({ rfi, onSave, onClose }) {
               <ReferenceField label="Tag No." value={revisionPreview?.tagNo} tone="orange" />
               <ReferenceField label="Request Date (Internal)" value={revisionPreview?.requestDateInternal} tone="orange" />
               <ReferenceField label="Request Time (Internal)" value={revisionPreview?.requestTimeInternal} tone="orange" />
-              <ReferenceField label="Due Date" value={revisionPreview?.dueDate} tone="orange" />
+              <ReferenceField label="Issue Date" value={revisionPreview?.dueDate} tone="orange" />
               <ReferenceField label="Request Date (Owner)" value={revisionPreview?.requestDateOwner} tone="orange" />
               <ReferenceField label="Request Time (Owner)" value={revisionPreview?.requestTimeOwner} tone="orange" />
               <ReferenceField label="Requested By" value={revisionPreview?.requestedBy} tone="orange" />

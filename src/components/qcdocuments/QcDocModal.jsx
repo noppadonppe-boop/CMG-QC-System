@@ -8,7 +8,7 @@ import Modal from '../common/Modal';
 import { FormField, Input, Select, FormGrid } from '../common/FormField';
 import { useApp } from '../../context/AppContext';
 import { storage } from '../../config/firebase';
-import { Upload, X, Loader2, Paperclip, FileText, Image, FileSpreadsheet, Plus, Trash2 } from 'lucide-react';
+import { Upload, X, Loader2, Paperclip, FileText, Image, FileSpreadsheet, Plus, Trash2, ExternalLink } from 'lucide-react';
 
 const CATEGORIES = ['Structural', 'Architectural', 'Mechanical', 'Electrical', 'Civil', 'HVAC', 'Plumbing', 'Landscape', 'Other'];
 const CATEGORY_GROUPS = ['Work method', 'Material approved', 'Drawing'];
@@ -61,6 +61,35 @@ export function generateTransmittalNo(projectNo, projectDocs) {
     .filter(n => !isNaN(n));
   const next = nums.length ? Math.max(...nums) + 1 : 1;
   return `${prefix}${String(next).padStart(4, '0')}`;
+}
+
+/**
+ * Parse filename to extract Document No, Rev, and Document Title.
+ * Pattern: {DocNo}_{DocTitle}_{Rev}.ext  (แบ่งด้วย _)
+ * Examples:
+ *   GMTP-1200-AR-DWG-051-002_Floor Plan_A.pdf  → { documentNo: 'GMTP-1200-AR-DWG-051-002', rev: 'A', documentTitle: 'Floor Plan' }
+ *   S-DWG-001_HVAC Layout_02.xlsx               → { documentNo: 'S-DWG-001', rev: '02', documentTitle: 'HVAC Layout' }
+ *   E-DWG-100_B.pdf                              → { documentNo: 'E-DWG-100', rev: 'B', documentTitle: '' }
+ *   Drawing-Simple.pdf                            → { documentNo: 'Drawing-Simple', rev: '', documentTitle: '' }
+ */
+function parseFileName(filename) {
+  // Remove extension
+  const nameOnly = filename.replace(/\.[^.]+$/, '');
+  // Split by underscore
+  const parts = nameOnly.split('_');
+  if (parts.length >= 3) {
+    // First part = Doc No, Last part = Rev, Middle = Document Title
+    const documentNo = parts[0].trim();
+    const rev = parts[parts.length - 1].trim();
+    const documentTitle = parts.slice(1, -1).join('_').trim();
+    return { documentNo, rev, documentTitle };
+  }
+  if (parts.length === 2) {
+    // {DocNo}_{Rev} — no title
+    return { documentNo: parts[0].trim(), rev: parts[1].trim(), documentTitle: '' };
+  }
+  // No underscore — entire name as Document No
+  return { documentNo: nameOnly.trim(), rev: '', documentTitle: '' };
 }
 
 function fileIcon(name = '') {
@@ -253,7 +282,10 @@ export default function QcDocModal({ doc, onSave, onClose, projectDocs = [], isD
   const [attachments,   setAttachments]   = useState(form.attachments);
   const [docTitleFiles, setDocTitleFiles] = useState(form.docTitleFiles);
   const [submitting,    setSubmitting]    = useState(false);
-  const [docRows,       setDocRows]       = useState([{ documentNo: '', rev: '', receiveDate: '' }]);
+  const [docRows,       setDocRows]       = useState([]);
+  const [docUploading,  setDocUploading]  = useState(false);
+  const [docUploadProg, setDocUploadProg] = useState(0);
+  const docFileInputRef = useRef(null);
   const [statusOptions, setStatusOptions] = useState(() => {
     const base = readStoredStatusOptions();
     const current = String(doc?.status || '').trim();
@@ -269,12 +301,52 @@ export default function QcDocModal({ doc, onSave, onClose, projectDocs = [], isD
     window.localStorage.setItem(STATUS_STORAGE_KEY, JSON.stringify(statusOptions));
   }, [statusOptions]);
 
-  function addDocRow() {
-    setDocRows(prev => [...prev, { documentNo: '', rev: '', receiveDate: '' }]);
+  async function handleDocFileUpload(fileList) {
+    if (!trNo || !selectedProjectId) {
+      alert('ยังไม่มี Transmittal No — กรุณารีโหลดหน้าแล้วลองใหม่');
+      return;
+    }
+    setDocUploading(true);
+    const newRows = [];
+    for (let i = 0; i < fileList.length; i++) {
+      const file = fileList[i];
+      if (!ALLOWED_MIME.includes(file.type)) {
+        alert(`"${file.name}" ไม่รองรับ — อัปโหลดได้เฉพาะ PDF, Excel, รูปภาพ`);
+        continue;
+      }
+      const seqNo = docRows.length + newRows.length + 1;
+      const seqStr = String(seqNo).padStart(2, '0');
+      const ext = file.name.split('.').pop();
+      const path = `qc-transmittals/${selectedProjectId}/${trNo}/Drawing${seqStr}.${ext}`;
+      const sRef = storageRef(storage, path);
+      const task = uploadBytesResumable(sRef, file);
+      await new Promise((resolve, reject) => {
+        task.on(
+          'state_changed',
+          snap => setDocUploadProg(Math.round((snap.bytesTransferred / snap.totalBytes) * 100)),
+          reject,
+          () => resolve(),
+        );
+      });
+      const url = await getDownloadURL(task.snapshot.ref);
+      const parsed = parseFileName(file.name);
+      newRows.push({
+        documentNo: parsed.documentNo,
+        rev: parsed.rev,
+        documentTitle: parsed.documentTitle,
+        fileUrl: url,
+        fileName: file.name,
+        receiveDate: '',
+      });
+    }
+    setDocRows(prev => [...prev, ...newRows]);
+    setDocUploading(false);
+    setDocUploadProg(0);
+    if (docFileInputRef.current) docFileInputRef.current.value = '';
   }
 
   function removeDocRow(idx) {
-    setDocRows(prev => prev.length > 1 ? prev.filter((_, i) => i !== idx) : prev);
+    setDocRows(prev => prev.filter((_, i) => i !== idx));
   }
 
   function updateDocRow(idx, field, value) {
@@ -329,11 +401,15 @@ export default function QcDocModal({ doc, onSave, onClose, projectDocs = [], isD
           projectId: selectedProjectId,
           projectNo: selectedProject.projectNo,
           attachments, docTitleFiles,
-          drawingLink: attachments[0]?.url ?? form.drawingLink ?? '',
+          drawingLink: docTitleFiles[0]?.url ?? form.drawingLink ?? '',
         });
       } finally { setSubmitting(false); }
     } else {
       /* ── Add / Duplicate mode — multi-row (same Transmittal No.) ── */
+      if (docRows.length === 0) {
+        alert('กรุณาอัปโหลดไฟล์อย่างน้อย 1 ไฟล์');
+        return;
+      }
       for (let i = 0; i < docRows.length; i++) {
         if (!docRows[i].documentNo?.trim()) { alert(`กรุณากรอก Document No. ในแถวที่ ${i + 1}`); return; }
         if (!docRows[i].rev?.trim()) { alert(`กรุณากรอก Rev. ในแถวที่ ${i + 1}`); return; }
@@ -350,10 +426,12 @@ export default function QcDocModal({ doc, onSave, onClose, projectDocs = [], isD
           projectId: selectedProjectId,
           projectNo: selectedProject.projectNo,
           documentNo: row.documentNo,
+          documentTitle: row.documentTitle,
           rev: row.rev,
           receiveDate: row.receiveDate,
-          attachments, docTitleFiles,
-          drawingLink: attachments[0]?.url ?? form.drawingLink ?? '',
+          attachments,
+          docTitleFiles: row.fileUrl ? [{ name: row.fileName, url: row.fileUrl }] : [],
+          drawingLink: form.drawingLink ?? '',
         }));
         onSave(records);
       } finally { setSubmitting(false); }
@@ -451,80 +529,124 @@ export default function QcDocModal({ doc, onSave, onClose, projectDocs = [], isD
             </FormField>
           </FormGrid>
         ) : (
-          /* Add / Duplicate mode — multi-row table */
+          /* Add / Duplicate mode — multi-file upload table */
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <label className="text-xs font-semibold text-slate-600">
                 Document List <span className="text-red-500 ml-0.5">*</span>
               </label>
-              <button type="button" onClick={addDocRow}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold text-orange-600 bg-orange-50 hover:bg-orange-100 border border-orange-200 rounded-lg transition-colors">
-                <Plus size={12} /> Add Row
+              <button type="button" onClick={() => docFileInputRef.current?.click()}
+                disabled={docUploading}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold text-orange-600 bg-orange-50 hover:bg-orange-100 border border-orange-200 rounded-lg transition-colors disabled:opacity-60 disabled:cursor-not-allowed">
+                {docUploading ? (
+                  <>
+                    <Loader2 size={12} className="animate-spin" />
+                    อัปโหลด... {docUploadProg}%
+                  </>
+                ) : (
+                  <>
+                    <Upload size={12} />
+                    Upload Files
+                  </>
+                )}
               </button>
+              <input
+                ref={docFileInputRef}
+                type="file"
+                multiple
+                accept={ALLOWED_EXT}
+                className="hidden"
+                onChange={e => handleDocFileUpload(e.target.files)}
+              />
             </div>
-            <div className="border border-slate-200 rounded-lg overflow-hidden">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="bg-slate-50 border-b border-slate-200">
-                    <th className="px-3 py-2 text-left font-semibold text-slate-600 w-10">#</th>
-                    <th className="px-3 py-2 text-left font-semibold text-slate-600">Document No. <span className="text-red-500">*</span></th>
-                    <th className="px-3 py-2 text-left font-semibold text-slate-600 w-24">Rev. <span className="text-red-500">*</span></th>
-                    <th className="px-3 py-2 text-left font-semibold text-slate-600 w-40">Stamp Date</th>
-                    <th className="px-3 py-2 w-10"></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {docRows.map((row, i) => (
-                    <tr key={i} className="hover:bg-orange-50/30 transition-colors">
-                      <td className="px-3 py-1.5 text-slate-400 font-mono text-center">{i + 1}</td>
-                      <td className="px-3 py-1.5">
-                        <input className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-400 text-slate-700"
-                          value={row.documentNo} onChange={e => updateDocRow(i, 'documentNo', e.target.value)} placeholder="S-DWG-001" />
-                      </td>
-                      <td className="px-3 py-1.5">
-                        <input className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-400 text-slate-700"
-                          value={row.rev} onChange={e => updateDocRow(i, 'rev', e.target.value)} placeholder="A" maxLength={4} />
-                      </td>
-                      <td className="px-3 py-1.5">
-                        <input type="date" className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-400 text-slate-700"
-                          value={row.receiveDate} onChange={e => updateDocRow(i, 'receiveDate', e.target.value)} />
-                      </td>
-                      <td className="px-3 py-1.5 text-center">
-                        {docRows.length > 1 && (
-                          <button type="button" onClick={() => removeDocRow(i)}
-                            className="w-6 h-6 rounded-md bg-red-50 hover:bg-red-100 flex items-center justify-center transition-colors" title="Remove row">
-                            <Trash2 size={11} className="text-red-500" />
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <p className="text-[10px] text-slate-400">
-              แต่ละ Row จะสร้างเป็น 1 รายการแยก โดยใช้ Transmittal No. เดียวกันทุก Row: <span className="font-semibold text-blue-600">{autoTrNo}</span> ({docRows.length} รายการ)
-            </p>
+
+            {docRows.length > 0 ? (
+              <div className="border border-slate-200 rounded-lg overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-200">
+                        <th className="px-2 py-2 text-left font-semibold text-slate-600 w-8">#</th>
+                        <th className="px-2 py-2 text-left font-semibold text-slate-600">Document No. <span className="text-red-500">*</span></th>
+                        <th className="px-2 py-2 text-left font-semibold text-slate-600 w-20">Rev. <span className="text-red-500">*</span></th>
+                        <th className="px-2 py-2 text-left font-semibold text-slate-600">Document Title</th>
+                        <th className="px-2 py-2 text-left font-semibold text-slate-600 w-44">Drawing / Attachment</th>
+                        <th className="px-2 py-2 text-left font-semibold text-slate-600 w-32">Stamp Date</th>
+                        <th className="px-2 py-2 w-8"></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {docRows.map((row, i) => (
+                        <tr key={i} className="hover:bg-orange-50/30 transition-colors">
+                          <td className="px-2 py-1.5 text-slate-400 font-mono text-center">{i + 1}</td>
+                          <td className="px-2 py-1.5">
+                            <input className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-400 text-slate-700"
+                              value={row.documentNo} onChange={e => updateDocRow(i, 'documentNo', e.target.value)} placeholder="S-DWG-001" />
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <input className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-400 text-slate-700"
+                              value={row.rev} onChange={e => updateDocRow(i, 'rev', e.target.value)} placeholder="A" maxLength={4} />
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <input className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-400 text-slate-700"
+                              value={row.documentTitle} onChange={e => updateDocRow(i, 'documentTitle', e.target.value)} placeholder="Document title" />
+                          </td>
+                          <td className="px-2 py-1.5">
+                            {row.fileUrl ? (
+                              <a href={row.fileUrl} target="_blank" rel="noopener noreferrer"
+                                className="flex items-center gap-1.5 text-[11px] text-blue-600 hover:text-blue-800 hover:underline truncate max-w-[160px]" title={row.fileName}>
+                                {fileIcon(row.fileName)}
+                                <span className="truncate">{row.fileName}</span>
+                                <ExternalLink size={10} className="shrink-0 opacity-60" />
+                              </a>
+                            ) : (
+                              <span className="text-slate-300 text-[11px]">—</span>
+                            )}
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <input type="date" className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-400 text-slate-700"
+                              value={row.receiveDate} onChange={e => updateDocRow(i, 'receiveDate', e.target.value)} />
+                          </td>
+                          <td className="px-2 py-1.5 text-center">
+                            <button type="button" onClick={() => removeDocRow(i)}
+                              className="w-6 h-6 rounded-md bg-red-50 hover:bg-red-100 flex items-center justify-center transition-colors" title="Remove row">
+                              <Trash2 size={11} className="text-red-500" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-8 px-4 border-2 border-dashed border-slate-200 rounded-lg bg-slate-50/50">
+                <Upload size={28} className="text-slate-300 mb-2" />
+                <p className="text-xs text-slate-400 text-center">
+                  คลิก <span className="font-semibold text-orange-500">Upload Files</span> เพื่ออัปโหลดไฟล์<br/>
+                  ระบบจะสร้างรายการอัตโนมัติจากชื่อไฟล์
+                </p>
+                <p className="text-[10px] text-slate-300 mt-1">รูปแบบชื่อไฟล์: DocNo_RevA_Title.pdf</p>
+              </div>
+            )}
+
+            {docRows.length > 0 && (
+              <p className="text-[10px] text-slate-400">
+                แต่ละ Row จะสร้างเป็น 1 รายการแยก โดยใช้ Transmittal No. เดียวกันทุก Row: <span className="font-semibold text-blue-600">{autoTrNo}</span> ({docRows.length} รายการ)
+              </p>
+            )}
           </div>
         )}
 
-        {/* Document Title — text field */}
-        <FormField label="Document Title" required>
-          <Input
-            value={form.documentTitle}
-            onChange={setField('documentTitle')}
-            placeholder="Full drawing / document title"
-            required
-          />
-        </FormField>
+        {/* Document Title — removed (now per-row column) */}
 
         {/* Document Title Files upload */}
         <FileUploader
           label="เอกสารแนบ (Document Title Files)"
           transmittalNo={trNo}
-          namePrefix="DocFile"
-          files={docTitleFiles}
-          setFiles={setDocTitleFiles}
+          namePrefix="Attachment"
+          files={attachments}
+          setFiles={setAttachments}
           projectId={selectedProjectId}
         />
 
@@ -597,16 +719,7 @@ export default function QcDocModal({ doc, onSave, onClose, projectDocs = [], isD
           </FormField>
         </FormGrid>
 
-        {/* Drawing / Transmittal Attachments upload */}
-        <FileUploader
-          label="Drawing / Transmittal Attachments"
-          transmittalNo={trNo}
-          namePrefix="Attachment"
-          files={attachments}
-          setFiles={setAttachments}
-          projectId={selectedProjectId}
-          maxSizeMB={null}
-        />
+        {/* Drawing / Transmittal Attachments — removed (now per-row column via file upload) */}
 
         {/* Legacy drawingLink notice (edit mode only) */}
         {isEdit && form.drawingLink && attachments.length === 0 && (
@@ -633,7 +746,7 @@ export default function QcDocModal({ doc, onSave, onClose, projectDocs = [], isD
             disabled={submitting}
             className="px-5 py-2 text-xs font-semibold text-white bg-orange-500 hover:bg-orange-600 rounded-lg transition-colors disabled:opacity-60"
           >
-            {submitting ? 'Saving…' : isEdit ? 'Save Changes' : `Add ${docRows.length} Document${docRows.length > 1 ? 's' : ''}`}
+            {submitting ? 'Saving…' : isEdit ? 'Save Changes' : docRows.length > 0 ? `Add ${docRows.length} Document${docRows.length > 1 ? 's' : ''}` : 'Add Document'}
           </button>
         </div>
       </form>
