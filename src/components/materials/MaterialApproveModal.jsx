@@ -13,16 +13,16 @@ import { Upload, X, Loader2, FileText, Image, FileSpreadsheet, CheckCircle2 } fr
 
 const APPROVAL_TYPES = [
   'Initial Review',
-  'Technical Approval', 
+  'Technical Approval',
   'Quality Approval',
-  'Final Approve'
+  'Final Approve',
 ];
 
 const APPROVAL_RESULTS = [
   'Approved',
   'Approved with Comments',
   'Rejected',
-  'Hold for Review'
+  'Hold for Review',
 ];
 
 const DOCUMENT_MIME = [
@@ -32,7 +32,6 @@ const DOCUMENT_MIME = [
   'image/jpeg', 'image/png', 'image/gif', 'image/webp',
 ];
 const DOCUMENT_EXT = '.pdf,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.webp';
-const DOCUMENT_MAX_MB = null; // ไม่จำกัดขนาดไฟล์
 
 function documentFileIcon(name = '') {
   const ext = name.split('.').pop()?.toLowerCase();
@@ -77,27 +76,19 @@ function DocumentThumb({ file, onRemove }) {
   );
 }
 
-export default function MaterialApproveModal({ material, onSave, onClose }) {
+export default function MaterialApproveModal({ documentRecord, approvalCount = 0, onSave, onClose }) {
   const { selectedProjectId } = useApp();
   const { userProfile } = useAuth();
 
   const displayName = [userProfile?.firstName, userProfile?.lastName].filter(Boolean).join(' ') || userProfile?.email || '';
-  const currentApprovalCount = (material.approvals || []).length;
-  const approvalNumber = currentApprovalCount + 1;
-
-  // Calculate remaining quantity
-  const totalQuantity = parseFloat(material.quantity) || 0;
-  const approvedQuantity = (material.approvals || []).reduce((sum, approval) => {
-    return sum + (parseFloat(approval.approvedQuantity) || 0);
-  }, 0);
-  const remainingQuantity = totalQuantity - approvedQuantity;
+  const approvalNumber = approvalCount + 1;
 
   const [form, setForm] = useState({
     approvalType: 'Initial Review',
     result: 'Approved',
     approvedBy: displayName,
     approvalDate: new Date().toISOString().slice(0, 10),
-    approvedQuantity: remainingQuantity.toString(),
+    rfiNo: documentRecord?.rfiNo || documentRecord?.transmittalNoRef || '',
     comments: '',
     documents: [],
   });
@@ -111,37 +102,46 @@ export default function MaterialApproveModal({ material, onSave, onClose }) {
   const set = (field) => (e) => setForm(f => ({ ...f, [field]: e.target.value }));
 
   async function handleDocumentFiles(fileList) {
-    if (!selectedProjectId || !material?.matRevNo?.trim()) {
-      setDocumentError('กรุณาเลือกโปรเจกต์และมี Material Rev No.');
+    if (!selectedProjectId || !documentRecord?.documentNo?.trim()) {
+      setDocumentError('กรุณาเลือกโปรเจกต์และระบุ Document No. ก่อนอัปโหลดไฟล์');
       return;
     }
     setDocumentError('');
     setDocumentUploading(true);
-    const safeMatRevNo = material.matRevNo.replace(/[/\\#?]/g, '-');
+
+    const keyBase = String(documentRecord.documentNo || documentRecord.id).replace(/[/\\#?]/g, '-');
     const results = [];
 
-    for (let i = 0; i < fileList.length; i++) {
-      const file = fileList[i];
-      if (!DOCUMENT_MIME.includes(file.type)) {
-        setDocumentError(`"${file.name}" ไม่รองรับ — อัปโหลดได้เฉพาะ PDF, Excel, รูปภาพ`);
-        continue;
+    try {
+      for (let i = 0; i < fileList.length; i++) {
+        const file = fileList[i];
+        if (!DOCUMENT_MIME.includes(file.type)) {
+          setDocumentError(`"${file.name}" ไม่รองรับ - อัปโหลดได้เฉพาะ PDF, Excel และรูปภาพ`);
+          continue;
+        }
+
+        const seq = documents.length + results.length + 1;
+        const ext = file.name.split('.').pop();
+        const path = `material-approvals/${selectedProjectId}/${keyBase}/approval-${approvalNumber}/${String(seq).padStart(2, '0')}.${ext}`;
+        const sRef = storageRef(storage, path);
+        const task = uploadBytesResumable(sRef, file);
+
+        await new Promise((resolve, reject) => {
+          task.on('state_changed', (snap) => {
+            setDocumentProgress(Math.round((snap.bytesTransferred / snap.totalBytes) * 100));
+          }, reject, () => resolve());
+        });
+
+        const url = await getDownloadURL(task.snapshot.ref);
+        results.push({ name: file.name, url });
       }
-      // ไม่จำกัดขนาดไฟล์
-      const seq = documents.length + results.length + 1;
-      const ext = file.name.split('.').pop();
-      const path = `material-approvals/${selectedProjectId}/${safeMatRevNo}/approval-${approvalNumber}/${String(seq).padStart(2, '0')}.${ext}`;
-      const sRef = storageRef(storage, path);
-      const task = uploadBytesResumable(sRef, file);
-      await new Promise((resolve, reject) => {
-        task.on('state_changed', (snap) => setDocumentProgress(Math.round((snap.bytesTransferred / snap.totalBytes) * 100)), reject, () => resolve());
-      });
-      const url = await getDownloadURL(task.snapshot.ref);
-      results.push({ name: file.name, url });
+
+      setDocuments(prev => [...prev, ...results]);
+    } finally {
+      setDocumentUploading(false);
+      setDocumentProgress(0);
+      if (documentInputRef.current) documentInputRef.current.value = '';
     }
-    setDocuments(prev => [...prev, ...results]);
-    setDocumentUploading(false);
-    setDocumentProgress(0);
-    if (documentInputRef.current) documentInputRef.current.value = '';
   }
 
   function removeDocument(idx) {
@@ -152,14 +152,29 @@ export default function MaterialApproveModal({ material, onSave, onClose }) {
     e.preventDefault();
     if (!form.approvalType.trim() || !form.result.trim()) return;
 
-    const approvalData = {
-      ...form,
+    onSave({
+      sourceDocId: documentRecord.id,
+      projectId: selectedProjectId,
+      transmittalNo: documentRecord.transmittalNo || '',
+      mapNo: documentRecord.documentNo || '',
+      documentNo: documentRecord.documentNo || '',
+      documentTitle: documentRecord.documentTitle || '',
+      rev: documentRecord.rev || '',
+      documentStatus: documentRecord.status || '',
+      documentType: documentRecord.isExternal ? 'External' : 'Internal',
+      issueDate: documentRecord.receiveDate || '',
+      category: documentRecord.category || '',
+      categoryGroup: documentRecord.categoryGroup || '',
+      rfiNo: form.rfiNo.trim(),
+      approvalType: form.approvalType,
+      result: form.result,
+      approvedBy: form.approvedBy.trim(),
+      approvalDate: form.approvalDate,
+      comments: form.comments.trim(),
       documents,
       approvalNumber,
       timestamp: new Date().toISOString(),
-    };
-
-    onSave(material, approvalData);
+    });
   }
 
   const resultStyle = {
@@ -174,7 +189,7 @@ export default function MaterialApproveModal({ material, onSave, onClose }) {
       title={
         <div className="flex flex-col gap-1">
           <h2 className="text-sm font-bold text-slate-800">Material Approve</h2>
-          <span className="text-lg font-bold text-green-600 tracking-tight">{material.matRevNo}</span>
+          <span className="text-lg font-bold text-green-600 tracking-tight">{documentRecord.documentNo || 'Document'}</span>
           <span className="text-[10px] text-green-500 font-semibold">APPROVAL #{approvalNumber}</span>
         </div>
       }
@@ -182,58 +197,41 @@ export default function MaterialApproveModal({ material, onSave, onClose }) {
       size="xl"
     >
       <form onSubmit={handleSubmit} className="space-y-6">
-
-        {/* ── Section 1: Material Info ── */}
         <div className="bg-slate-50 rounded-xl p-4 border border-slate-100">
           <div className="flex items-center gap-2 mb-3">
-            <div className="w-5 h-5 rounded-full bg-slate-500 text-white flex items-center justify-center text-[10px] font-bold shrink-0">ℹ</div>
-            <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Material Information</h3>
+            <div className="w-5 h-5 rounded-full bg-slate-500 text-white flex items-center justify-center text-[10px] font-bold shrink-0">i</div>
+            <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Document Information</h3>
           </div>
           <div className="grid grid-cols-3 gap-4 text-xs">
             <div>
-              <span className="text-slate-500 font-medium">Description:</span>
-              <div className="font-semibold text-slate-800 mt-0.5">{material.description}</div>
+              <span className="text-slate-500 font-medium">Transmittal No.:</span>
+              <div className="font-semibold text-slate-800 mt-0.5">{documentRecord.transmittalNo || '—'}</div>
             </div>
             <div>
-              <span className="text-slate-500 font-medium">Category:</span>
-              <div className="font-semibold text-slate-800 mt-0.5">{material.category}</div>
+              <span className="text-slate-500 font-medium">MAP No.:</span>
+              <div className="font-semibold text-slate-800 mt-0.5">{documentRecord.documentNo || '—'}</div>
             </div>
             <div>
-              <span className="text-slate-500 font-medium">Supplier:</span>
-              <div className="font-semibold text-slate-800 mt-0.5">{material.supplier || '—'}</div>
+              <span className="text-slate-500 font-medium">Revision:</span>
+              <div className="font-semibold text-slate-800 mt-0.5">{documentRecord.rev || '—'}</div>
+            </div>
+            <div className="col-span-2">
+              <span className="text-slate-500 font-medium">Document Title:</span>
+              <div className="font-semibold text-slate-800 mt-0.5">{documentRecord.documentTitle || '—'}</div>
             </div>
             <div>
-              <span className="text-slate-500 font-medium">Material Spec / Package Ref.:</span>
-              <div className="font-semibold text-slate-800 mt-0.5">{material.materialSpecPackage || '—'}</div>
-            </div>
-            <div>
-              <span className="text-slate-500 font-medium">Total Quantity:</span>
-              <div className="font-semibold text-slate-800 mt-0.5">{totalQuantity} {material.unit}</div>
-            </div>
-            <div>
-              <span className="text-slate-500 font-medium">Approved Quantity:</span>
-              <div className="font-semibold text-green-600 mt-0.5">{approvedQuantity} {material.unit}</div>
-            </div>
-            <div>
-              <span className="text-slate-500 font-medium">Remaining Quantity:</span>
-              <div className={`font-bold mt-0.5 ${remainingQuantity > 0 ? 'text-orange-600' : 'text-green-600'}`}>
-                {remainingQuantity} {material.unit}
-              </div>
-            </div>
-            <div>
-              <span className="text-slate-500 font-medium">Previous Approvals:</span>
-              <div className="font-semibold text-slate-800 mt-0.5">{currentApprovalCount} time{currentApprovalCount !== 1 ? 's' : ''}</div>
+              <span className="text-slate-500 font-medium">Document Status:</span>
+              <div className="font-semibold text-slate-800 mt-0.5">{documentRecord.status || '—'}</div>
             </div>
           </div>
         </div>
 
-        {/* ── Section 2: Approval Details ── */}
         <div>
           <div className="flex items-center gap-2 mb-3">
             <div className="w-5 h-5 rounded-full bg-green-500 text-white flex items-center justify-center text-[10px] font-bold shrink-0">1</div>
             <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Approval Details</h3>
           </div>
-          <FormGrid cols={3}>
+          <FormGrid cols={4}>
             <FormField label="Approval Type" required>
               <Select value={form.approvalType} onChange={set('approvalType')} required>
                 {APPROVAL_TYPES.map(t => <option key={t}>{t}</option>)}
@@ -245,34 +243,11 @@ export default function MaterialApproveModal({ material, onSave, onClose }) {
             <FormField label="Approved By" required>
               <Input value={form.approvedBy} onChange={set('approvedBy')} placeholder="Name" required />
             </FormField>
+            <FormField label="RFI No.">
+              <Input value={form.rfiNo} onChange={set('rfiNo')} placeholder="RFI-2026-0001" />
+            </FormField>
           </FormGrid>
 
-          <div className="mt-4">
-            <FormField label={`Approved Quantity (${material.unit})`} required>
-              <div className="flex items-center gap-2">
-                <Input
-                  type="number"
-                  value={form.approvedQuantity}
-                  onChange={set('approvedQuantity')}
-                  placeholder="0"
-                  min="0"
-                  max={remainingQuantity}
-                  step="0.01"
-                  required
-                />
-                <div className="text-xs text-slate-500 whitespace-nowrap">
-                  Max: {remainingQuantity} {material.unit}
-                </div>
-              </div>
-              {parseFloat(form.approvedQuantity) > remainingQuantity && (
-                <p className="text-[11px] text-red-500 mt-1">
-                  ⚠️ Approved quantity cannot exceed remaining quantity ({remainingQuantity} {material.unit})
-                </p>
-              )}
-            </FormField>
-          </div>
-
-          {/* Result radio cards */}
           <div className="mt-4">
             <FormField label="Approval Result" required>
               <div className="grid grid-cols-2 gap-2 mt-1">
@@ -293,9 +268,6 @@ export default function MaterialApproveModal({ material, onSave, onClose }) {
                       onChange={set('result')}
                       className="hidden"
                     />
-                    <span>
-                      {r === 'Approved' ? '✅' : r === 'Approved with Comments' ? '💬' : r === 'Rejected' ? '❌' : '⏸'}
-                    </span>
                     {r}
                   </label>
                 ))}
@@ -304,7 +276,6 @@ export default function MaterialApproveModal({ material, onSave, onClose }) {
           </div>
         </div>
 
-        {/* ── Section 3: Comments & Documents ── */}
         <div>
           <div className="flex items-center gap-2 mb-3">
             <div className="w-5 h-5 rounded-full bg-green-500 text-white flex items-center justify-center text-[10px] font-bold shrink-0">2</div>
@@ -323,7 +294,6 @@ export default function MaterialApproveModal({ material, onSave, onClose }) {
           <div className="mt-4">
             <FormField label="Upload Approval Documents">
               <div className="space-y-2">
-                {/* Document Thumbnails */}
                 {documents.length > 0 && (
                   <div className="flex flex-wrap gap-2">
                     {documents.map((doc, i) => (
@@ -346,7 +316,7 @@ export default function MaterialApproveModal({ material, onSave, onClose }) {
                     ) : (
                       <>
                         <Upload size={13} />
-                        เลือกไฟล์ (PDF, Excel, รูปภาพ) — อัปได้หลายไฟล์
+                        เลือกไฟล์ (PDF, Excel, รูปภาพ)
                       </>
                     )}
                   </button>
@@ -370,14 +340,19 @@ export default function MaterialApproveModal({ material, onSave, onClose }) {
         </div>
 
         <div className="flex justify-end gap-3 pt-2 border-t border-slate-100">
-          <button type="button" onClick={onClose}
-            className="px-4 py-2 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+          >
             Cancel
           </button>
-          <button type="submit"
-            className="flex items-center gap-2 px-6 py-2 text-xs font-semibold text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors">
+          <button
+            type="submit"
+            className="flex items-center gap-2 px-6 py-2 text-xs font-semibold text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors"
+          >
             <CheckCircle2 size={14} />
-            {form.approvalType === 'Final Approve' ? 'Final Approve' : 'Submit Approval'}
+            Submit Approval
           </button>
         </div>
       </form>

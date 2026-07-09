@@ -3,8 +3,175 @@ const admin = require("firebase-admin");
 const { PDFDocument } = require("pdf-lib");
 const FormData = require("form-data");
 const fetch = require("node-fetch");
+const fs = require("fs");
+const path = require("path");
 
 admin.initializeApp();
+
+function readEnvValueFromRootFile(key) {
+  try {
+    const envPath = path.resolve(__dirname, "..", ".env");
+    if (!fs.existsSync(envPath)) return "";
+    const lines = fs.readFileSync(envPath, "utf8").split(/\r?\n/);
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const separatorIndex = trimmed.indexOf("=");
+      if (separatorIndex === -1) continue;
+      const envKey = trimmed.slice(0, separatorIndex).trim();
+      if (envKey !== key) continue;
+      return trimmed.slice(separatorIndex + 1).trim().replace(/^"(.*)"$/, "$1");
+    }
+    return "";
+  } catch (error) {
+    console.error(`Failed to read ${key} from root .env`, error);
+    return "";
+  }
+}
+
+function getEnvValue(key) {
+  return process.env[key] || readEnvValueFromRootFile(key);
+}
+
+function getTagSyncSecret() {
+  const runtimeConfigSecret = functions.config()?.tag?.sync_secret;
+  return getEnvValue("TAG_SYNC_SECRET") || runtimeConfigSecret || "";
+}
+
+function normalizeOptionValue(value) {
+  return String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function sanitizeTagValues(values, prefix = "") {
+  const cleanPrefix = String(prefix || "").trim();
+  const deduped = new Map();
+  for (const rawValue of Array.isArray(values) ? values : []) {
+    const tagValue = String(rawValue || "").trim();
+    if (!tagValue) continue;
+    const value = cleanPrefix ? `${cleanPrefix} ${tagValue}` : tagValue;
+    const normalizedValue = normalizeOptionValue(value);
+    if (!normalizedValue || deduped.has(normalizedValue)) continue;
+    deduped.set(normalizedValue, {
+      value,
+      tagValue,
+      prefix: cleanPrefix,
+    });
+  }
+  return [...deduped.entries()].map(([normalizedValue, item]) => ({
+    normalizedValue,
+    value: item.value,
+    tagValue: item.tagValue,
+    prefix: item.prefix,
+  }));
+}
+
+function buildOptionDocId(projectId, field, value) {
+  const normalizedValue = normalizeOptionValue(value);
+  if (!projectId || !field || !normalizedValue) return "";
+  return `${projectId}__${field}__${encodeURIComponent(normalizedValue)}`;
+}
+
+exports.syncGoogleSheetTagNos = functions
+  .region("asia-southeast1")
+  .https.onRequest(async (req, res) => {
+    res.set("Access-Control-Allow-Origin", "*");
+    res.set("Access-Control-Allow-Headers", "Content-Type");
+    res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+
+    if (req.method === "OPTIONS") {
+      res.status(204).send("");
+      return;
+    }
+
+    if (req.method !== "POST") {
+      res.status(405).json({ ok: false, error: "method-not-allowed" });
+      return;
+    }
+
+    const configuredSecret = getTagSyncSecret();
+    if (!configuredSecret) {
+      res.status(500).json({ ok: false, error: "missing-tag-sync-secret" });
+      return;
+    }
+
+    const {
+      secret,
+      projectId,
+      values,
+      tags,
+      prefix = "",
+      building = "",
+      spreadsheetId = "",
+      sheetName = "",
+      range = "D3:D",
+    } = req.body || {};
+
+    if (secret !== configuredSecret) {
+      res.status(401).json({ ok: false, error: "unauthorized" });
+      return;
+    }
+
+    if (!projectId) {
+      res.status(400).json({ ok: false, error: "missing-project-id" });
+      return;
+    }
+
+    const appliedPrefix = String(prefix || building || "").trim();
+    const preparedTags = sanitizeTagValues(Array.isArray(values) ? values : tags, appliedPrefix);
+    const collectionRef = admin.firestore()
+      .collection("QC-System")
+      .doc("root")
+      .collection("tagOptions");
+
+    const existingSnapshot = await collectionRef
+      .where("projectId", "==", projectId)
+      .where("field", "==", "tagNo")
+      .get();
+
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    const batch = admin.firestore().batch();
+    const existingDocIds = new Set(existingSnapshot.docs.map((docSnap) => docSnap.id));
+    let created = 0;
+    let skipped = 0;
+
+    for (const item of preparedTags) {
+      const docId = buildOptionDocId(projectId, "tagNo", item.value);
+      if (!docId) continue;
+      if (existingDocIds.has(docId)) {
+        skipped++;
+        continue;
+      }
+      batch.set(collectionRef.doc(docId), {
+        projectId,
+        field: "tagNo",
+        value: item.value,
+        prefix: item.prefix,
+        building: item.prefix,
+        tagValue: item.tagValue,
+        normalizedValue: item.normalizedValue,
+        active: true,
+        source: "google-sheet",
+        spreadsheetId,
+        sheetName,
+        range,
+        syncedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      }, { merge: true });
+      created++;
+    }
+
+    await batch.commit();
+
+    res.status(200).json({
+      ok: true,
+      projectId,
+      prefix: appliedPrefix,
+      received: preparedTags.length,
+      created,
+      skipped,
+    });
+  });
 
 exports.processExtractPdf = functions
   .region("asia-southeast1") // Adjust region if needed, defaults to us-central1 if omitted, but let's use a safe default and the user can change it

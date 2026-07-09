@@ -21,15 +21,18 @@ export function AppProvider({ children }) {
   const [selectedProjectId, setSelectedProjectId] = useState('');
 
   const [projects,     setProjects]     = useState([]);
+  const [tagOptions,   setTagOptions]   = useState([]);
   const [qcDocuments,  setQcDocuments]  = useState([]);
   const [itpItems,     setItpItems]     = useState([]);
   const [rfiItems,     setRfiItems]     = useState([]);
   const [materials,    setMaterials]    = useState([]);
+  const [materialApprovals, setMaterialApprovals] = useState([]);
   const [ncrItems,     setNcrItems]     = useState([]);
   const [punchlist,    setPunchlist]    = useState([]);
   const [handover,     setHandover]     = useState([]);
   const [finalPackage, setFinalPackage] = useState([]);
   const [markupDwgItems, setMarkupDwgItems] = useState([]);
+  const [markupTagIdItems, setMarkupTagIdItems] = useState([]);
   const [extractPdfItems, setExtractPdfItems] = useState([]);
 
   // Admin roles see every project; others only see their assigned projects
@@ -57,7 +60,7 @@ export function AppProvider({ children }) {
 
     setFirestoreError(null);
     let resolved = 0;
-    const total  = 11;
+    const total  = 14;
 
     function onLoad() {
       resolved++;
@@ -68,15 +71,18 @@ export function AppProvider({ children }) {
 
     const unsubs = [
       subscribeCategory(categories.projects,     d => { setProjects(d);     onLoad(); }),
+      subscribeCategory(categories.tagOptions,   d => { setTagOptions(d);   onLoad(); }),
       subscribeCategory(categories.qcDocuments,  d => { setQcDocuments(d);  onLoad(); }),
       subscribeCategory(categories.itp,          d => { setItpItems(d);     onLoad(); }),
       subscribeCategory(categories.rfi,          d => { setRfiItems(d);     onLoad(); }),
       subscribeCategory(categories.materials,    d => { setMaterials(d);    onLoad(); }),
+      subscribeCategory(categories.materialApprovals, d => { setMaterialApprovals(d); onLoad(); }),
       subscribeCategory(categories.ncr,          d => { setNcrItems(d);     onLoad(); }),
       subscribeCategory(categories.punchlist,    d => { setPunchlist(d);    onLoad(); }),
       subscribeCategory(categories.handover,     d => { setHandover(d);     onLoad(); }),
       subscribeCategory(categories.finalPackage, d => { setFinalPackage(d); onLoad(); }),
       subscribeCategory(categories.markupDwg,    d => { setMarkupDwgItems(d); onLoad(); }),
+      subscribeCategory(categories.markupTagId,  d => { setMarkupTagIdItems(d); onLoad(); }),
       subscribeCategory(categories.extractPdf,   d => { setExtractPdfItems(d); onLoad(); }),
     ];
 
@@ -130,6 +136,11 @@ export function AppProvider({ children }) {
   const updateProject = (id, c, lu) => updateItemPersist(setProjects, categories.projects, id, c, lu);
   const deleteProject = id      => deleteItemPersist(setProjects, categories.projects, id);
 
+  // โ”€โ”€ Tag Options โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€
+  const addTagOption    = item    => addItemPersist(setTagOptions, categories.tagOptions, item);
+  const updateTagOption = (id, c, lu) => updateItemPersist(setTagOptions, categories.tagOptions, id, c, lu);
+  const deleteTagOption = id      => deleteItemPersist(setTagOptions, categories.tagOptions, id);
+
   // ── QC Documents ─────────────────────────────────────────────────────────────
   const addQcDocument    = item    => addItemPersist(setQcDocuments, categories.qcDocuments, item);
   const updateQcDocument = (id, c, lu) => updateItemPersist(setQcDocuments, categories.qcDocuments, id, c, lu);
@@ -149,6 +160,10 @@ export function AppProvider({ children }) {
   const addMaterial    = item    => addItemPersist(setMaterials, categories.materials, item);
   const updateMaterial = (id, c, lu) => updateItemPersist(setMaterials, categories.materials, id, c, lu);
   const deleteMaterial = id      => deleteItemPersist(setMaterials, categories.materials, id);
+
+  const addMaterialApproval    = item    => addItemPersist(setMaterialApprovals, categories.materialApprovals, item);
+  const updateMaterialApproval = (id, c, lu) => updateItemPersist(setMaterialApprovals, categories.materialApprovals, id, c, lu);
+  const deleteMaterialApproval = id      => deleteItemPersist(setMaterialApprovals, categories.materialApprovals, id);
 
   // ── NCR ──────────────────────────────────────────────────────────────────────
   const addNcr    = item    => addItemPersist(setNcrItems, categories.ncr, item);
@@ -175,6 +190,11 @@ export function AppProvider({ children }) {
   const updateMarkupDwg = (id, c, lu) => updateItemPersist(setMarkupDwgItems, categories.markupDwg, id, c, lu);
   const deleteMarkupDwg = id      => deleteItemPersist(setMarkupDwgItems, categories.markupDwg, id);
 
+  // โ”€โ”€ Markup Tag ID โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€โ”€
+  const addMarkupTagId    = item    => addItemPersist(setMarkupTagIdItems, categories.markupTagId, item);
+  const updateMarkupTagId = (id, c, lu) => updateItemPersist(setMarkupTagIdItems, categories.markupTagId, id, c, lu);
+  const deleteMarkupTagId = id      => deleteItemPersist(setMarkupTagIdItems, categories.markupTagId, id);
+
   // ── Extract PDF ─────────────────────────────────────────────────────────────
   const addExtractPdf    = item    => addItemPersist(setExtractPdfItems, categories.extractPdf, item);
   const updateExtractPdf = (id, c, lu) => updateItemPersist(setExtractPdfItems, categories.extractPdf, id, c, lu);
@@ -188,15 +208,18 @@ export function AppProvider({ children }) {
     dataLoaded,
     firestoreError,
     projects,     addProject,     updateProject,     deleteProject,
+    tagOptions,   addTagOption,   updateTagOption,   deleteTagOption,
     qcDocuments,  addQcDocument,  updateQcDocument,  deleteQcDocument,
     itpItems,     addItp,         updateItp,         deleteItp,
     rfiItems,     addRfi,         updateRfi,         deleteRfi,
     materials,    addMaterial,    updateMaterial,    deleteMaterial,
+    materialApprovals, addMaterialApproval, updateMaterialApproval, deleteMaterialApproval,
     ncrItems,     addNcr,         updateNcr,         deleteNcr,
     punchlist,    addPunch,       updatePunch,       deletePunch,
     handover,     addHandover,    updateHandover,    deleteHandover,
     finalPackage, addFinalPackage, updateFinalPackage, deleteFinalPackage,
     markupDwgItems, addMarkupDwg, updateMarkupDwg, deleteMarkupDwg,
+    markupTagIdItems, addMarkupTagId, updateMarkupTagId, deleteMarkupTagId,
     extractPdfItems, addExtractPdf, updateExtractPdf, deleteExtractPdf,
   };
 

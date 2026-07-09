@@ -628,7 +628,7 @@ export default function UserManagementPanel() {
     { id: 'punchlist',     label: 'Punch List' },
     { id: 'handover',      label: 'Handover' },
     { id: 'final-package', label: 'Final Document Package' },
-    { id: 'markup-dwg',    label: 'Markup DWG' },
+    { id: 'markup-dwg',    label: 'Markup RFI' },
     { id: 'markup-tag-id', label: 'Markup Tag ID' },
     { id: 'admin-users',   label: 'จัดการผู้ใช้' },
   ];
@@ -671,7 +671,11 @@ export default function UserManagementPanel() {
       { id: 'saveMarkup',    label: 'Save Markup' },
       { id: 'deleteMarkup',  label: 'Delete Markup' },
     ],
-    'markup-tag-id': [],
+    'markup-tag-id': [
+      { id: 'editMarkup',    label: 'Edit Markup' },
+      { id: 'saveMarkup',    label: 'Save Markup' },
+      { id: 'deleteMarkup',  label: 'Delete Markup' },
+    ],
     materials: [
       { id: 'addMaterial',    label: 'Add Material Record' },
       { id: 'editMaterial',   label: 'Edit Material Record' },

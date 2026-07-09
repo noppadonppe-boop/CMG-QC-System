@@ -80,7 +80,7 @@ const NAV_ITEMS = [
     children: [
       {
         id: 'markup-dwg',
-        label: 'Markup FRI',
+        label: 'Markup RFI',
         roles: ['MD', 'CD', 'PM', 'QcDocCenter', 'SiteQcInspector'],
       },
       {

@@ -4,6 +4,8 @@ import {
   GoogleAuthProvider,
   createUserWithEmailAndPassword,
   signOut,
+  setPersistence,
+  browserLocalPersistence,
 } from 'firebase/auth';
 import {
   doc,
@@ -76,6 +78,9 @@ async function createUserProfile(user, overrides = {}) {
 export async function loginWithEmail(email, password) {
   setSessionExpiry(); // MUST be before any await to prevent race condition
   try {
+    // บังคับให้ Firebase เก็บ Token ไว้ใน Local Storage (Persistent Session)
+    // ต้องเรียกก่อน signIn เสมอ เพื่อให้ auth state คงอยู่แม้ปิด browser/refresh หน้า
+    await setPersistence(auth, browserLocalPersistence);
     const { user } = await signInWithEmailAndPassword(auth, email, password);
     const profile   = await fetchUserProfile(user.uid);
     logActivity('LOGIN', user.uid, { method: 'email' });
@@ -93,6 +98,8 @@ export async function loginWithEmail(email, password) {
 export async function loginWithGoogle() {
   setSessionExpiry();
   try {
+    // ตั้งค่า Persistence ก่อนเปิด popup login เสมอ
+    await setPersistence(auth, browserLocalPersistence);
     const { user } = await signInWithPopup(auth, googleProvider);
     const existing  = await fetchUserProfile(user.uid);
     if (existing) {
@@ -125,6 +132,8 @@ export async function loginWithGoogle() {
 
 export async function registerWithEmail(email, password, firstName, lastName, position) {
   setSessionExpiry();
+  // ตั้งค่า Persistence ก่อน register/สร้างบัญชีใหม่ เพื่อให้ auto-login คงสถานะไว้
+  await setPersistence(auth, browserLocalPersistence);
   const { user } = await createUserWithEmailAndPassword(auth, email, password);
   const profile   = await createUserProfile(user, { firstName, lastName, position });
   logActivity('REGISTER', user.uid, { method: 'email' });

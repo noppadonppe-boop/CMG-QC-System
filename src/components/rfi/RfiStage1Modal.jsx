@@ -75,14 +75,6 @@ const INSPECTION_TYPES = [
 
 const STATUS_OPTIONS = ['Open', 'Pending', 'Pass', 'Reject', 'Comment', 'Pass with comment'];
 
-const TAG_NO_DEFAULTS = [
-  'TAG-001',
-  'TAG-002',
-  'TAG-003',
-  'TAG-004',
-  'TAG-005',
-];
-
 const WORKING_STEP_DEFAULTS = [
   'Ecavation/Lean',
   'Formwork/Install rebar',
@@ -130,6 +122,16 @@ function normalizeOptions(options) {
       .map((item) => String(item || '').trim())
       .filter(Boolean),
   )];
+}
+
+function normalizeOptionValue(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function buildSharedOptionId(projectId, field, value) {
+  const normalized = normalizeOptionValue(value);
+  if (!projectId || !field || !normalized) return '';
+  return `${projectId}__${field}__${encodeURIComponent(normalized)}`;
 }
 
 function readStoredOptions(storageKey, defaults, currentValue = '') {
@@ -203,7 +205,14 @@ const EMPTY = {
 };
 
 export default function RfiStage1Modal({ rfi, onSave, onClose }) {
-  const { selectedProject, selectedProjectId, rfiItems } = useApp();
+  const {
+    selectedProject,
+    selectedProjectId,
+    rfiItems,
+    tagOptions,
+    addTagOption,
+    deleteTagOption,
+  } = useApp();
   const { userProfile } = useAuth();
   const { canAction } = useMenuPermissions();
   const canEditRfiNo = canAction('rfi', 'editRfiNo');
@@ -213,7 +222,6 @@ export default function RfiStage1Modal({ rfi, onSave, onClose }) {
   const autoRequestNo = generateRequestNo(selectedProject?.projectNo ?? '', projectRfiItems);
   const requestNo = rfi ? rfi.requestNo : autoRequestNo;
   const [users, setUsers] = useState([]);
-  const tagNoStorageKey = getOptionStorageKey(selectedProjectId, 'tagNo');
   const workingStepStorageKey = getOptionStorageKey(selectedProjectId, 'workingStep');
   const structureTypeStorageKey = getOptionStorageKey(selectedProjectId, 'structureType');
   const typeOfInspectionStorageKey = getOptionStorageKey(selectedProjectId, 'typeOfInspection');
@@ -237,6 +245,15 @@ export default function RfiStage1Modal({ rfi, onSave, onClose }) {
       .sort((a, b) => a.localeCompare(b));
   }, [users, selectedProjectId]);
 
+  const sharedTagNoOptions = useMemo(() => {
+    const activeProjectTags = (tagOptions || [])
+      .filter((item) => item.projectId === selectedProjectId && item.field === 'tagNo' && item.active !== false)
+      .map((item) => String(item.value || '').trim())
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+    return normalizeOptions([...activeProjectTags, rfi?.tagNo]);
+  }, [tagOptions, selectedProjectId, rfi?.tagNo]);
+
   const [form, setForm] = useState(() => {
     if (rfi) {
       return {
@@ -258,9 +275,6 @@ export default function RfiStage1Modal({ rfi, onSave, onClose }) {
   });
   const [referDrawingFiles, setReferDrawingFiles] = useState(
     Array.isArray(form.referDrawingFiles) ? form.referDrawingFiles : [],
-  );
-  const [tagNoOptions, setTagNoOptions] = useState(() =>
-    readStoredOptions(tagNoStorageKey, TAG_NO_DEFAULTS, rfi?.tagNo),
   );
   const [workingStepOptions, setWorkingStepOptions] = useState(() =>
     readStoredOptions(workingStepStorageKey, WORKING_STEP_DEFAULTS, rfi?.workingStep),
@@ -293,11 +307,6 @@ export default function RfiStage1Modal({ rfi, onSave, onClose }) {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    window.localStorage.setItem(tagNoStorageKey, JSON.stringify(normalizeOptions(tagNoOptions)));
-  }, [tagNoOptions, tagNoStorageKey]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
     window.localStorage.setItem(workingStepStorageKey, JSON.stringify(normalizeOptions(workingStepOptions)));
   }, [workingStepOptions, workingStepStorageKey]);
 
@@ -311,20 +320,33 @@ export default function RfiStage1Modal({ rfi, onSave, onClose }) {
     window.localStorage.setItem(typeOfInspectionStorageKey, JSON.stringify(normalizeOptions(typeOfInspectionOptions)));
   }, [typeOfInspectionOptions, typeOfInspectionStorageKey]);
 
-  function addTagNoOption() {
+  async function addTagNoOption() {
     const val = window.prompt('เพิ่มรายการ Tag No.');
     const next = (val || '').trim();
-    if (!next) return;
-    setTagNoOptions(prev => (prev.includes(next) ? prev : [...prev, next]));
+    if (!next || !selectedProjectId) return;
+    const optionId = buildSharedOptionId(selectedProjectId, 'tagNo', next);
+    if (!optionId) return;
+    await addTagOption({
+      id: optionId,
+      projectId: selectedProjectId,
+      field: 'tagNo',
+      value: next,
+      normalizedValue: normalizeOptionValue(next),
+      source: 'manual',
+      active: true,
+    });
     setForm(f => ({ ...f, tagNo: next }));
   }
 
-  function removeTagNoOption() {
+  async function removeTagNoOption() {
     const current = (form.tagNo || '').trim();
-    if (!current) return;
+    if (!current || !selectedProjectId) return;
     const ok = window.confirm(`ลบรายการนี้ออกจาก dropdown?\n\n"${current}"`);
     if (!ok) return;
-    setTagNoOptions(prev => prev.filter(x => x !== current));
+    const optionId = buildSharedOptionId(selectedProjectId, 'tagNo', current);
+    if (optionId) {
+      await deleteTagOption(optionId);
+    }
     setForm(f => ({ ...f, tagNo: '' }));
   }
 
@@ -470,7 +492,7 @@ export default function RfiStage1Modal({ rfi, onSave, onClose }) {
               <div className="flex items-center gap-1">
                 <Select value={form.tagNo} onChange={set('tagNo')}>
                   <option value="">— Select Tag No. —</option>
-                  {tagNoOptions.map(opt => <option key={opt}>{opt}</option>)}
+                  {sharedTagNoOptions.map(opt => <option key={opt}>{opt}</option>)}
                 </Select>
                 <button type="button" onClick={addTagNoOption} className="p-1.5 rounded bg-green-100 hover:bg-green-200 text-green-700 transition-colors" title="เพิ่ม Tag No.">
                   <Plus size={12} />

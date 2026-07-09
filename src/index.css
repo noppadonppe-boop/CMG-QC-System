@@ -15,3 +15,66 @@ body {
   display: flex;
   flex-direction: column;
 }
+
+table[data-column-table="materials-table"],
+table[data-column-table="materials-approval-table"] {
+  font-size: 0.75rem !important;
+  line-height: 1rem !important;
+}
+
+table[data-column-table="materials-table"] thead th,
+table[data-column-table="materials-approval-table"] thead th {
+  padding: 0.5rem 0.75rem !important;
+  font-size: 10px !important;
+  line-height: 1rem !important;
+}
+
+table[data-column-table="materials-table"] tbody td,
+table[data-column-table="materials-approval-table"] tbody td {
+  padding: 0.25rem 0.75rem !important;
+  vertical-align: middle !important;
+  line-height: 1rem !important;
+}
+
+table[data-column-table="materials-table"] tbody [class*="rounded-full"],
+table[data-column-table="materials-approval-table"] tbody [class*="rounded-full"] {
+  padding: 1px 0.375rem !important;
+  font-size: 10px !important;
+  line-height: 1 !important;
+}
+
+table[data-column-table="materials-table"] tbody button {
+  display: inline-flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 0.25rem !important;
+  padding: 0.1875rem 0.5rem !important;
+  border-radius: 0.5rem !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
+}
+
+table[data-column-table="materials-table"] tbody button svg {
+  width: 10px !important;
+  height: 10px !important;
+}
+
+table[data-column-table="materials-table"] tbody button > :last-child {
+  display: none !important;
+}
+
+table[data-column-table="materials-approval-table"] tbody a {
+  padding: 1px 0.375rem !important;
+  font-size: 10px !important;
+  line-height: 1 !important;
+}
+
+table[data-column-table="materials-table"] tbody td > div,
+table[data-column-table="materials-approval-table"] tbody td > div {
+  line-height: 1rem !important;
+}
+
+table[data-column-table="materials-approval-table"] tbody td .truncate + div {
+  font-size: 10px !important;
+  line-height: 0.9rem !important;
+}

@@ -28,7 +28,7 @@ export async function ensureRootDocument() {
   }
 }
 
-/** อ้างอิง subcollection ใต้ root เช่น projects, qcDocuments, itp, rfi, materials, ncr, punchlist, handover, finalPackage, users */
+/** อ้างอิง subcollection ใต้ root เช่น projects, qcDocuments, itp, rfi, materials, materialApprovals, ncr, punchlist, handover, finalPackage, users */
 function subcollectionRef(category) {
   return collection(db, COLLECTION_NAME, ROOT_DOC_ID, category);
 }
@@ -141,14 +141,17 @@ export async function updateItemSafe(category, id, changes, lastUpdatedAt) {
 export const categories = {
   users:        'users',
   projects:     'projects',
+  tagOptions:   'tagOptions',
   qcDocuments:  'qcDocuments',
   itp:          'itp',
   rfi:          'rfi',
   materials:    'materials',
+  materialApprovals: 'materialApprovals',
   ncr:          'ncr',
   punchlist:    'punchlist',
   handover:     'handover',
   finalPackage: 'finalPackage',
   markupDwg:    'markupDwg',
+  markupTagId:  'markupTagId',
   extractPdf:   'extractPdf',
 };

@@ -260,6 +260,7 @@ export default function QcDocModal({ doc, onSave, onClose, projectDocs = [], isD
       : (storedStatusOptions[0] || '');
     return {
       transmittalNoRef: base.transmittalNoRef ?? '',
+      rfiNo:          base.rfiNo ?? '',
       isExternal:     typeof base.isExternal === 'boolean' ? base.isExternal : false,
       from:           base.from           ?? '',
       transmittalNo:  autoTrNo,
@@ -496,6 +497,14 @@ export default function QcDocModal({ doc, onSave, onClose, projectDocs = [], isD
             onChange={setField('transmittalNoRef')}
             placeholder={form.isExternal ? 'กรอกเลข Transmittal อ้างอิง (บังคับ)' : 'อ้างอิงเลข Transmittal เดิม (ถ้ามี)'}
             required={form.isExternal === true}
+          />
+        </FormField>
+
+        <FormField label="RFI No.">
+          <Input
+            value={form.rfiNo || ''}
+            onChange={setField('rfiNo')}
+            placeholder="RFI-2026-0001"
           />
         </FormField>
 

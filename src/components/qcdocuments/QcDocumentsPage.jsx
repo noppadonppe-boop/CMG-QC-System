@@ -242,6 +242,7 @@ function DocDetailModal({ doc, onClose, onEdit, onDelete }) {
           {[
             { label: 'Transmittal No.', value: doc.transmittalNo },
             { label: 'Trans. Ref',      value: doc.transmittalNoRef || '—' },
+            { label: 'RFI No.',         value: doc.rfiNo || '—' },
             { label: 'Trans. Date',     value: doc.transmittalDate || '—' },
             { label: 'Stamp Date',      value: doc.receiveDate || '—' },
             { label: 'From',            value: doc.from || '—' },
@@ -581,7 +582,7 @@ export default function QcDocumentsPage() {
       // Global search: match any field value
       if (q) {
         const allValues = [
-          d.transmittalNo, d.transmittalNoRef, d.transmittalDate,
+          d.transmittalNo, d.transmittalNoRef, d.transmittalDate, d.rfiNo,
           d.from, d.isExternal ? 'External' : 'Internal',
           d.categoryGroup, d.category, d.documentNo, d.documentTitle,
           d.receiveDate, d.rev ? `Rev. ${d.rev}` : '', d.status,

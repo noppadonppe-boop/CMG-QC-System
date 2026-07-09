@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 import {
   Upload, FileText, Edit2, Save, X, Loader2,
-  Trash2, ArrowUp, ArrowDown, RefreshCw, ZoomIn, ZoomOut, Plus, Building2, Folder, FolderPlus
+  Trash2, ArrowUp, ArrowDown, RefreshCw, ZoomIn, ZoomOut, Plus, Building2, Folder, FolderPlus, ChevronDown, ChevronRight
 } from 'lucide-react';
 import { storage } from '../../config/firebase';
 import { ref as storageRef, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
@@ -28,11 +28,62 @@ function sortPagesByOrder(pages = []) {
   return [...pages].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 }
 
-function buildPageName(pageTitle, fileName, pageNumber, totalPages) {
+function buildDocumentName(pageTitle, fileName) {
   const fallbackTitle = getBaseFileName(fileName) || 'Markup Page';
-  const resolvedTitle = pageTitle?.trim() || fallbackTitle;
-  if (totalPages <= 1) return resolvedTitle;
-  return `${resolvedTitle} - Page ${pageNumber}`;
+  return pageTitle?.trim() || fallbackTitle;
+}
+
+function groupPagesIntoDocuments(pages = []) {
+  const sortedPages = sortPagesByOrder(pages);
+  const documents = [];
+  const documentMap = new Map();
+
+  sortedPages.forEach((page, index) => {
+    const documentId = page.documentId || page.id;
+    const fallbackName = page.name?.trim() || `Page ${index + 1}`;
+
+    if (!documentMap.has(documentId)) {
+      const document = {
+        id: documentId,
+        name: page.documentName?.trim() || fallbackName,
+        createdAt: page.createdAt,
+        pages: [],
+      };
+      documentMap.set(documentId, document);
+      documents.push(document);
+    }
+
+    const document = documentMap.get(documentId);
+    document.pages.push(page);
+  });
+
+  return documents.map((document) => ({
+    ...document,
+    pages: [...document.pages].sort((a, b) => {
+      const left = a.pageNumber ?? a.order ?? 0;
+      const right = b.pageNumber ?? b.order ?? 0;
+      return left - right;
+    }),
+  }));
+}
+
+function getPageDisplayName(page, pageIndex, totalPages) {
+  if (page.pageTitle?.trim()) return page.pageTitle.trim();
+  if ((page.totalPages || totalPages || 1) > 1) {
+    return `Page ${page.pageNumber || pageIndex + 1}`;
+  }
+  return page.documentName?.trim() || page.name?.trim() || `Page ${pageIndex + 1}`;
+}
+
+function getDefaultPageTitle(page, pageIndex) {
+  return `Page ${page.pageNumber || pageIndex + 1}`;
+}
+
+function hasCustomPageTitle(page, pageIndex, totalPages) {
+  const currentTitle = page.pageTitle?.trim();
+  if (!currentTitle) return false;
+  if ((page.totalPages || totalPages || 1) <= 1) return false;
+  return currentTitle !== getDefaultPageTitle(page, pageIndex);
 }
 
 function isPdfFile(file) {
@@ -51,21 +102,81 @@ function formatPageDate(value) {
   return `${day}.${month}.${year}`;
 }
 
-function PageCard({ page, index, isEditMode, onMoveUp, onMoveDown, onDelete, onReplace, totalPages, zoom }) {
-  const pageLabel = formatPageDate(page.createdAt) || `Page ${index + 1}`;
+function PageCard({
+  document,
+  index,
+  isEditMode,
+  isExpanded,
+  onToggleExpand,
+  onRename,
+  onMoveUp,
+  onMoveDown,
+  onDeleteDocument,
+  onReplacePage,
+  onDeletePage,
+  onRenamePage,
+  totalDocuments,
+  zoom,
+}) {
+  const documentLabel = formatPageDate(document.createdAt) || `Item ${index + 1}`;
+  const ExpandIcon = isExpanded ? ChevronDown : ChevronRight;
+  const canReplaceDocument = document.pages.length === 1;
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-      <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
-        <div className="min-w-0">
-          <div className="text-sm font-bold text-slate-800 truncate">{page.name || `Page ${index + 1}`}</div>
-          <div className="text-[11px] text-slate-500">Upload Date: {pageLabel}</div>
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={onToggleExpand}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            onToggleExpand();
+          }
+        }}
+        className="flex cursor-pointer items-center justify-between gap-3 border-b border-slate-100 px-4 py-3"
+      >
+        <div className="flex min-w-0 flex-1 items-start gap-3">
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggleExpand();
+            }}
+            className="mt-0.5 rounded-lg border border-slate-200 p-1.5 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-700"
+            title={isExpanded ? 'Collapse item' : 'Expand item'}
+          >
+            <ExpandIcon size={15} />
+          </button>
+          <div className="min-w-0 flex-1">
+            {isEditMode ? (
+              <input
+                type="text"
+                value={document.name || ''}
+                onChange={(event) => onRename(event.target.value)}
+                onClick={(event) => event.stopPropagation()}
+                placeholder={`Item ${index + 1}`}
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-400"
+              />
+            ) : (
+              <div className="text-sm font-bold text-slate-800 truncate">{document.name || `Item ${index + 1}`}</div>
+            )}
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+              <span>Upload Date: {documentLabel}</span>
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-600">
+                {document.pages.length} {document.pages.length > 1 ? 'pages' : 'page'}
+              </span>
+            </div>
+          </div>
         </div>
         {isEditMode && (
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={onMoveUp}
+              onClick={(event) => {
+                event.stopPropagation();
+                onMoveUp();
+              }}
               disabled={index === 0}
               className="rounded-lg border border-slate-200 p-2 text-slate-600 hover:bg-slate-50 disabled:opacity-40"
               title="Move up"
@@ -74,26 +185,37 @@ function PageCard({ page, index, isEditMode, onMoveUp, onMoveDown, onDelete, onR
             </button>
             <button
               type="button"
-              onClick={onMoveDown}
-              disabled={index === totalPages - 1}
+              onClick={(event) => {
+                event.stopPropagation();
+                onMoveDown();
+              }}
+              disabled={index === totalDocuments - 1}
               className="rounded-lg border border-slate-200 p-2 text-slate-600 hover:bg-slate-50 disabled:opacity-40"
               title="Move down"
             >
               <ArrowDown size={15} />
             </button>
+            {canReplaceDocument && (
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onReplacePage(document.pages[0]?.id);
+                }}
+                className="rounded-lg border border-slate-200 p-2 text-slate-600 hover:bg-slate-50"
+                title="Replace image"
+              >
+                <RefreshCw size={15} />
+              </button>
+            )}
             <button
               type="button"
-              onClick={onReplace}
-              className="rounded-lg border border-slate-200 p-2 text-slate-600 hover:bg-slate-50"
-              title="Replace image"
-            >
-              <RefreshCw size={15} />
-            </button>
-            <button
-              type="button"
-              onClick={onDelete}
+              onClick={(event) => {
+                event.stopPropagation();
+                onDeleteDocument();
+              }}
               className="rounded-lg border border-red-200 p-2 text-red-600 hover:bg-red-50"
-              title="Delete page"
+              title="Delete item"
             >
               <Trash2 size={15} />
             </button>
@@ -101,34 +223,115 @@ function PageCard({ page, index, isEditMode, onMoveUp, onMoveDown, onDelete, onR
         )}
       </div>
 
-      <div className="bg-slate-100 p-4">
-        <div className="overflow-auto rounded-xl border border-slate-200 bg-white p-2">
-          <div
-            className="mx-auto"
-            style={{
-              width: `${zoom}%`,
-            }}
-          >
-            <img
-              src={page.url}
-              alt={page.name || `Page ${index + 1}`}
-              className="block h-auto w-full"
-            />
+      {isExpanded && (
+        <div className="bg-slate-100 p-4">
+          <div className="space-y-4">
+            {document.pages.map((page, pageIndex) => (
+              <div key={page.id} className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+                {(() => {
+                  const isCustomPageName = hasCustomPageTitle(page, pageIndex, document.pages.length);
+                  const shouldShowPageMeta = document.pages.length > 1 && !isCustomPageName;
+
+                  return (
+                    <>
+                <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
+                  <div className="min-w-0 flex-1">
+                    {isEditMode ? (
+                      <input
+                        type="text"
+                        value={page.pageTitle || ''}
+                        onChange={(event) => onRenamePage(page.id, event.target.value)}
+                        onClick={(event) => event.stopPropagation()}
+                        placeholder={getPageDisplayName(page, pageIndex, document.pages.length)}
+                        className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                      />
+                    ) : (
+                      <div className="mt-1 text-sm font-semibold text-slate-700">
+                        {getPageDisplayName(page, pageIndex, document.pages.length)}
+                      </div>
+                    )}
+                    {(shouldShowPageMeta || document.pages.length === 1) && (
+                      <div className="mt-1 text-[11px] text-slate-500">
+                        {shouldShowPageMeta
+                          ? `${getDefaultPageTitle(page, pageIndex)} of ${page.totalPages || document.pages.length}`
+                          : document.name || `Item ${index + 1}`}
+                      </div>
+                    )}
+                  </div>
+                  {isEditMode && document.pages.length > 1 && (
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => onReplacePage(page.id)}
+                        className="rounded-lg border border-slate-200 p-2 text-slate-600 hover:bg-slate-50"
+                        title="Replace page image"
+                      >
+                        <RefreshCw size={14} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onDeletePage(page.id)}
+                        className="rounded-lg border border-red-200 p-2 text-red-600 hover:bg-red-50"
+                        title="Delete page"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <div className="overflow-auto p-2">
+                  <div
+                    className="mx-auto"
+                    style={{
+                      width: `${zoom}%`,
+                    }}
+                  >
+                    <img
+                      src={page.url}
+                      alt={document.pages.length > 1 ? `Page ${page.pageNumber || pageIndex + 1}` : (document.name || `Item ${index + 1}`)}
+                      className="block h-auto w-full"
+                    />
+                  </div>
+                </div>
+                    </>
+                  );
+                })()}
+              </div>
+            ))}
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
 
-export default function MarkupDwgPage() {
-  const { selectedProject, markupDwgItems, addMarkupDwg, updateMarkupDwg } = useApp();
+export default function MarkupDwgPage({ mode = 'rfi' }) {
+  const {
+    selectedProject,
+    markupDwgItems,
+    addMarkupDwg,
+    updateMarkupDwg,
+    markupTagIdItems,
+    addMarkupTagId,
+    updateMarkupTagId,
+  } = useApp();
   const { canAction } = useMenuPermissions();
-  const canEdit = canAction('markup-dwg', 'editMarkup');
-  const canSave = canAction('markup-dwg', 'saveMarkup');
+  const isTagIdMode = mode === 'tag-id';
+  const menuId = isTagIdMode ? 'markup-tag-id' : 'markup-dwg';
+  const storageFolder = isTagIdMode ? 'markup-tag-id' : 'markup-dwg';
+  const pageTitle = isTagIdMode ? 'Markup Tag ID' : 'Markup RFI';
+  const pageDescription = isTagIdMode
+    ? 'จัดการไฟล์ Markup Tag ID แยกตามอาคาร อัพโหลด PDF และแปลงเป็นรูปภาพแต่ละหน้า'
+    : 'จัดการไฟล์ Markup RFI แยกตามอาคาร อัพโหลด PDF และแปลงเป็นรูปภาพแต่ละหน้า';
+  const markupItems = isTagIdMode ? markupTagIdItems : markupDwgItems;
+  const addMarkupItem = isTagIdMode ? addMarkupTagId : addMarkupDwg;
+  const updateMarkupItem = isTagIdMode ? updateMarkupTagId : updateMarkupDwg;
+  const canEdit = canAction(menuId, 'editMarkup');
+  const canSave = canAction(menuId, 'saveMarkup');
 
   const uploadFileInputRef = useRef(null);
   const replaceImageInputRef = useRef(null);
+  const expansionScopeRef = useRef('');
 
   const [isEditMode, setIsEditMode] = useState(false);
   const [busyLabel, setBusyLabel] = useState('');
@@ -148,11 +351,12 @@ export default function MarkupDwgPage() {
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [uploadPageName, setUploadPageName] = useState('');
   const [uploadFile, setUploadFile] = useState(null);
+  const [expandedDocuments, setExpandedDocuments] = useState({});
 
   const currentMarkup = useMemo(() => {
     if (!selectedProject) return null;
-    return markupDwgItems.find(item => item.id === selectedProject.id || item.projectId === selectedProject.id) || null;
-  }, [markupDwgItems, selectedProject]);
+    return markupItems.find(item => item.id === selectedProject.id || item.projectId === selectedProject.id) || null;
+  }, [markupItems, selectedProject]);
 
   const buildings = useMemo(() => {
     const rawBuildings = currentMarkup?.buildings || [];
@@ -232,9 +436,9 @@ export default function MarkupDwgPage() {
     };
 
     if (currentMarkup) {
-      await updateMarkupDwg(selectedProject.id, base);
+      await updateMarkupItem(selectedProject.id, base);
     } else {
-      await addMarkupDwg(base);
+      await addMarkupItem(base);
     }
   }
 
@@ -361,10 +565,16 @@ export default function MarkupDwgPage() {
       standardFontDataUrl: `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/standard_fonts/`,
     }).promise;
     const pages = [];
+    const documentId = createId('markup-doc');
+    const documentName = buildDocumentName(uploadPageName, pdfFile.name);
 
     for (let i = 1; i <= pdf.numPages; i += 1) {
+      const pageStart = ((i - 1) / pdf.numPages) * 100;
+      const pageEnd = (i / pdf.numPages) * 100;
+      const halfway = pageStart + ((pageEnd - pageStart) * 0.45);
+
       setBusyLabel(`Converting PDF page ${i}/${pdf.numPages}`);
-      setBusyProgress(Math.round((i / pdf.numPages) * 100));
+      setBusyProgress(Math.round(pageStart));
 
       const page = await pdf.getPage(i);
       const viewport = page.getViewport({ scale: 2 });
@@ -379,6 +589,8 @@ export default function MarkupDwgPage() {
         viewport,
       }).promise;
 
+      setBusyProgress(Math.round(halfway));
+
       const blob = await new Promise((resolve, reject) => {
         canvas.toBlob((value) => {
           if (value) resolve(value);
@@ -387,12 +599,21 @@ export default function MarkupDwgPage() {
       });
 
       const safeName = pdfFile.name.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9-_]/g, '-');
-      const imagePath = `markup-dwg/${selectedProject.id}/buildings/${activeBuilding}/groups/${activeGroup}/pages/${safeName}-${String(i).padStart(2, '0')}-${Date.now()}.png`;
-      const imageUrl = await uploadBlob(blob, imagePath);
+      const imagePath = `${storageFolder}/${selectedProject.id}/buildings/${activeBuilding}/groups/${activeGroup}/pages/${safeName}-${String(i).padStart(2, '0')}-${Date.now()}.png`;
+      const imageUrl = await uploadBlob(blob, imagePath, (progress) => {
+        const mapped = halfway + (((pageEnd - halfway) * progress) / 100);
+        setBusyLabel(`Uploading page ${i}/${pdf.numPages}`);
+        setBusyProgress(Math.round(mapped));
+      });
 
       pages.push({
         id: createId(),
-        name: buildPageName(uploadPageName, pdfFile.name, i, pdf.numPages),
+        documentId,
+        documentName,
+        name: documentName,
+        pageNumber: i,
+        totalPages: pdf.numPages,
+        pageTitle: `Page ${i}`,
         url: imageUrl,
         order: i - 1,
         createdAt: new Date().toISOString(),
@@ -410,13 +631,19 @@ export default function MarkupDwgPage() {
 
     const ext = getFileExtension(file.name, 'png');
     const safeName = getBaseFileName(file.name).replace(/[^a-zA-Z0-9-_]/g, '-');
-    const imagePath = `markup-dwg/${selectedProject.id}/buildings/${activeBuilding}/groups/${activeGroup}/manual/${safeName}-${Date.now()}.${ext}`;
+    const imagePath = `${storageFolder}/${selectedProject.id}/buildings/${activeBuilding}/groups/${activeGroup}/manual/${safeName}-${Date.now()}.${ext}`;
     const imageUrl = await uploadBlob(file, imagePath, setBusyProgress);
+    const documentName = buildDocumentName(uploadPageName, file.name);
 
     return [
       {
         id: createId(),
-        name: buildPageName(uploadPageName, file.name, 1, 1),
+        documentId: createId('markup-doc'),
+        documentName,
+        name: documentName,
+        pageNumber: 1,
+        totalPages: 1,
+        pageTitle: documentName,
         url: imageUrl,
         order: 0,
         createdAt: new Date().toISOString(),
@@ -465,7 +692,7 @@ export default function MarkupDwgPage() {
         setBusyLabel('Uploading original PDF');
         setBusyProgress(0);
 
-        const pdfPath = `markup-dwg/${selectedProject.id}/buildings/${activeBuilding}/groups/${activeGroup}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9-_.]/g, '-')}`;
+        const pdfPath = `${storageFolder}/${selectedProject.id}/buildings/${activeBuilding}/groups/${activeGroup}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9-_.]/g, '-')}`;
         uploadedFileUrl = await uploadBlob(file, pdfPath, setBusyProgress);
       }
 
@@ -516,12 +743,12 @@ export default function MarkupDwgPage() {
       setBusyProgress(0);
 
       const ext = getFileExtension(file.name, 'png');
-      const path = `markup-dwg/${selectedProject.id}/buildings/${activeBuilding}/groups/${activeGroup}/manual/${Date.now()}-replace.${ext}`;
+      const path = `${storageFolder}/${selectedProject.id}/buildings/${activeBuilding}/groups/${activeGroup}/manual/${Date.now()}-replace.${ext}`;
       const url = await uploadBlob(file, path, setBusyProgress);
 
       setDraftPages(prev => prev.map(page => (
         page.id === replaceTargetId
-          ? { ...page, url, name: file.name }
+          ? { ...page, url }
           : page
       )));
     } catch (error) {
@@ -549,18 +776,56 @@ export default function MarkupDwgPage() {
     setIsEditMode(false);
   }
 
-  function movePage(index, direction) {
-    setDraftPages(prev => {
-      const next = [...prev];
-      const targetIndex = index + direction;
-      if (targetIndex < 0 || targetIndex >= next.length) return prev;
-      [next[index], next[targetIndex]] = [next[targetIndex], next[index]];
+  function deletePage(pageId) {
+    setDraftPages(prev => prev.filter(page => page.id !== pageId));
+  }
+
+  function renameDocument(documentId, name) {
+    setDraftPages(prev => prev.map((page) => (
+      (page.documentId || page.id) === documentId
+        ? { ...page, documentName: name, name }
+        : page
+    )));
+  }
+
+  function renamePageTitle(pageId, name) {
+    setDraftPages(prev => prev.map((page, index) => (
+      page.id === pageId
+        ? {
+          ...page,
+          pageTitle: name,
+          name: page.documentName?.trim() || page.name?.trim() || `Item ${index + 1}`,
+        }
+        : page
+    )));
+  }
+
+  function deleteDocument(document) {
+    const pageIds = new Set(document.pages.map((page) => page.id));
+    setDraftPages(prev => prev.filter((page) => !pageIds.has(page.id)));
+    setExpandedDocuments(prev => {
+      const next = { ...prev };
+      delete next[document.id];
       return next;
     });
   }
 
-  function deletePage(pageId) {
-    setDraftPages(prev => prev.filter(page => page.id !== pageId));
+  function moveDocument(documentIndex, direction) {
+    setDraftPages((prev) => {
+      const documents = groupPagesIntoDocuments(prev);
+      const targetIndex = documentIndex + direction;
+      if (targetIndex < 0 || targetIndex >= documents.length) return prev;
+
+      const nextDocuments = [...documents];
+      [nextDocuments[documentIndex], nextDocuments[targetIndex]] = [nextDocuments[targetIndex], nextDocuments[documentIndex]];
+
+      return nextDocuments.flatMap((document, nextDocIndex) => (
+        document.pages.map((page, pageIndex) => ({
+          ...page,
+          order: nextDocIndex * 1000 + pageIndex,
+        }))
+      ));
+    });
   }
 
   async function saveDraftPages() {
@@ -582,6 +847,9 @@ export default function MarkupDwgPage() {
                   sourcePdfUrl: draftSourcePdfUrl || '',
                   pages: draftPages.map((page, index) => ({
                     ...page,
+                    documentName: page.documentName?.trim() || page.name?.trim() || `Item ${index + 1}`,
+                    name: page.documentName?.trim() || page.name?.trim() || `Item ${index + 1}`,
+                    pageTitle: page.pageTitle?.trim() || getPageDisplayName(page, index, page.totalPages || 1),
                     order: index,
                   }))
                 };
@@ -608,6 +876,56 @@ export default function MarkupDwgPage() {
   }
 
   const visiblePages = sortPagesByOrder(isEditMode ? draftPages : (currentGroup?.pages || []));
+  const visibleDocuments = useMemo(() => groupPagesIntoDocuments(visiblePages), [visiblePages]);
+
+  useEffect(() => {
+    const scope = `${selectedProject?.id || 'no-project'}:${activeBuilding || 'no-building'}:${activeGroup || 'no-group'}:${isEditMode ? 'edit' : 'view'}`;
+    if (!visibleDocuments.length) {
+      expansionScopeRef.current = scope;
+      setExpandedDocuments({});
+      return;
+    }
+    if (expansionScopeRef.current === scope) return;
+
+    expansionScopeRef.current = scope;
+    setExpandedDocuments(() => {
+      const next = {};
+      visibleDocuments.forEach((document, index) => {
+        next[document.id] = index === 0;
+      });
+      return next;
+    });
+  }, [activeBuilding, activeGroup, isEditMode, selectedProject?.id, visibleDocuments]);
+
+  useEffect(() => {
+    if (!visibleDocuments.length) return;
+    setExpandedDocuments((prev) => {
+      const next = {};
+      let changed = false;
+
+      visibleDocuments.forEach((document) => {
+        if (document.id in prev) {
+          next[document.id] = prev[document.id];
+        } else {
+          next[document.id] = false;
+          changed = true;
+        }
+      });
+
+      if (Object.keys(prev).length !== Object.keys(next).length) {
+        changed = true;
+      }
+
+      return changed ? next : prev;
+    });
+  }, [visibleDocuments]);
+
+  function toggleDocumentExpanded(documentId) {
+    setExpandedDocuments(prev => ({
+      ...prev,
+      [documentId]: !(prev[documentId] ?? true),
+    }));
+  }
 
   function zoomOut() {
     setZoom(prev => Math.max(0, prev - 10));
@@ -623,7 +941,7 @@ export default function MarkupDwgPage() {
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="flex items-center gap-3">
-              <h1 className="text-lg font-bold text-slate-800">Markup RFI</h1>
+              <h1 className="text-lg font-bold text-slate-800">{pageTitle}</h1>
               {(isEditMode ? draftSourceFileName : currentGroup?.sourceFileName) && (
                 <div className="flex items-center gap-2 text-sm text-slate-600">
                   <FileText size={16} />
@@ -632,7 +950,7 @@ export default function MarkupDwgPage() {
               )}
             </div>
             <p className="mt-1 text-sm text-slate-500">
-              จัดการไฟล์ Markup RFI แยกตามอาคาร อัพโหลด PDF และแปลงเป็นรูปภาพแต่ละหน้า
+              {pageDescription}
             </p>
           </div>
 
@@ -646,7 +964,7 @@ export default function MarkupDwgPage() {
               สร้างอาคาร
             </button>
 
-            {!!visiblePages.length && (
+            {!!visibleDocuments.length && (
               <div className="mr-2 inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
                 <button
                   type="button"
@@ -726,9 +1044,12 @@ export default function MarkupDwgPage() {
 
         {!!busyLabel && (
           <div className="mt-4 rounded-xl border border-orange-200 bg-orange-50 px-4 py-3">
-            <div className="flex items-center gap-2 text-sm font-semibold text-orange-700">
-              <Loader2 size={16} className="animate-spin" />
-              {busyLabel}
+            <div className="flex items-center justify-between gap-3 text-sm font-semibold text-orange-700">
+              <div className="flex items-center gap-2">
+                <Loader2 size={16} className="animate-spin" />
+                {busyLabel}
+              </div>
+              <span>{busyProgress}%</span>
             </div>
             <div className="mt-2 h-2 rounded-full bg-orange-100">
               <div
@@ -800,6 +1121,24 @@ export default function MarkupDwgPage() {
                   Supports PDF, JPG, PNG and WEBP. New pages will always be placed above older pages.
                 </p>
               </div>
+
+              {!!busyLabel && (
+                <div className="rounded-xl border border-orange-200 bg-orange-50 px-4 py-3">
+                  <div className="flex items-center justify-between gap-3 text-xs font-semibold text-orange-700">
+                    <div className="flex items-center gap-2">
+                      <Loader2 size={14} className="animate-spin" />
+                      {busyLabel}
+                    </div>
+                    <span>{busyProgress}%</span>
+                  </div>
+                  <div className="mt-2 h-2 rounded-full bg-orange-100">
+                    <div
+                      className="h-2 rounded-full bg-orange-500 transition-all"
+                      style={{ width: `${busyProgress}%` }}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="mt-5 flex gap-3">
@@ -816,7 +1155,7 @@ export default function MarkupDwgPage() {
                 disabled={!uploadFile || !uploadPageName.trim() || !!busyLabel}
                 className="flex-1 rounded-lg bg-orange-500 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                Upload
+                {busyLabel ? `Uploading ${busyProgress}%` : 'Upload'}
               </button>
             </div>
           </div>
@@ -1089,7 +1428,7 @@ export default function MarkupDwgPage() {
               </button>
             </div>
           </div>
-        ) : !visiblePages.length ? (
+        ) : !visibleDocuments.length ? (
           <div className="flex h-full items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white">
             <div className="max-w-md text-center">
               <Upload size={48} className="mx-auto mb-4 text-slate-400" />
@@ -1109,19 +1448,24 @@ export default function MarkupDwgPage() {
           </div>
         ) : (
           <div className="flex w-full flex-col gap-5">
-            {visiblePages
-              .map((page, index, pages) => (
+            {visibleDocuments
+              .map((document, index, documents) => (
                 <PageCard
-                  key={page.id}
-                  page={page}
+                  key={document.id}
+                  document={document}
                   index={index}
-                  totalPages={pages.length}
+                  totalDocuments={documents.length}
                   isEditMode={isEditMode}
-                  onMoveUp={() => movePage(index, -1)}
-                  onMoveDown={() => movePage(index, 1)}
-                  onDelete={() => deletePage(page.id)}
-                  onReplace={() => {
-                    setReplaceTargetId(page.id);
+                  isExpanded={expandedDocuments[document.id] ?? false}
+                  onToggleExpand={() => toggleDocumentExpanded(document.id)}
+                  onRename={(name) => renameDocument(document.id, name)}
+                  onRenamePage={(pageId, name) => renamePageTitle(pageId, name)}
+                  onMoveUp={() => moveDocument(index, -1)}
+                  onMoveDown={() => moveDocument(index, 1)}
+                  onDeleteDocument={() => deleteDocument(document)}
+                  onDeletePage={(pageId) => deletePage(pageId)}
+                  onReplacePage={(pageId) => {
+                    setReplaceTargetId(pageId);
                     replaceImageInputRef.current?.click();
                   }}
                   zoom={zoom}

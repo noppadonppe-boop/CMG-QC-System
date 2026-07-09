@@ -54,7 +54,7 @@ const DASHBOARD_PROJECT_TABLE_COLUMNS = [
 export default function Dashboard() {
   const {
     selectedProject,
-    qcDocuments, itpItems, rfiItems, materials,
+    qcDocuments, itpItems, rfiItems,
     ncrItems, punchlist, visibleProjects,
   } = useApp();
   const { userProfile } = useAuth();
@@ -69,7 +69,7 @@ export default function Dashboard() {
   const projectDocs  = qcDocuments.filter(d => d.projectId === pid);
   const projectItps  = itpItems.filter(d => d.projectId === pid);
   const projectRfis  = rfiItems.filter(d => d.projectId === pid);
-  const projectMats  = materials.filter(d => d.projectId === pid);
+  const projectMats  = projectDocs.filter(d => d.categoryGroup === 'Material approved');
   const projectNcrs  = ncrItems.filter(d => d.projectId === pid);
   const projectPunch = punchlist.filter(d => d.projectId === pid);
 

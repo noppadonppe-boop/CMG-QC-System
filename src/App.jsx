@@ -3,6 +3,7 @@ import { Routes, Route } from 'react-router-dom';
 import { AuthProvider }  from './auth/AuthContext';
 import { AppProvider }   from './context/AppContext';
 import ProtectedRoute    from './auth/ProtectedRoute';
+import PublicRoute       from './auth/PublicRoute';
 import ErrorBoundary     from './components/common/ErrorBoundary';
 import LoginPage         from './pages/auth/LoginPage';
 import RegisterPage      from './pages/auth/RegisterPage';
@@ -32,7 +33,7 @@ const MODULE_TITLES = {
   handover:       'Handover',
   'final-package':'Final Document Package',
   markup:         'Markup',
-  'markup-dwg':   'Markup DWG',
+  'markup-dwg':   'Markup RFI',
   'markup-tag-id':'Markup Tag ID',
 };
 
@@ -50,8 +51,8 @@ function MainApp() {
     if (activePage === 'punchlist')    return <PunchListPage />;
     if (activePage === 'handover')     return <HandoverPage />;
     if (activePage === 'final-package') return <FinalPackagePage />;
-    if (activePage === 'markup-dwg')   return <MarkupDwgPage />;
-    if (activePage === 'markup-tag-id') return <ComingSoon title="Markup Tag ID" />;
+    if (activePage === 'markup-dwg')   return <MarkupDwgPage mode="rfi" />;
+    if (activePage === 'markup-tag-id') return <MarkupDwgPage mode="tag-id" />;
     if (activePage === 'extract-pdf')  return <ExtractPdfPage />;
     if (activePage === 'admin-users')  return <UserManagementPanel />;
     return <ComingSoon title={MODULE_TITLES[activePage] || activePage} />;
@@ -69,9 +70,9 @@ export default function App() {
     <ErrorBoundary>
       <AuthProvider>
         <Routes>
-          {/* Public routes */}
-          <Route path="/login"    element={<LoginPage />} />
-          <Route path="/register" element={<RegisterPage />} />
+          {/* Public routes — ครอบด้วย PublicRoute เพื่อกัน Login กระพริบและ Redirect อัตโนมัติถ้ามี Token อยู่แล้ว */}
+          <Route path="/login"    element={<PublicRoute><LoginPage /></PublicRoute>} />
+          <Route path="/register" element={<PublicRoute><RegisterPage /></PublicRoute>} />
           <Route path="/pending"  element={<PendingApprovalPage />} />
 
           {/* Protected — path="*" คือ wildcard ที่ถูกต้องใน React Router v6 */}
