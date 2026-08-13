@@ -37,7 +37,7 @@ export default function Modal({ title, onClose, children, size = 'md' }) {
             <X size={15} className="text-slate-500" />
           </button>
         </div>
-        <div className="overflow-y-auto flex-1 px-6 py-5">
+        <div data-modal-scroll-body className="overflow-y-auto flex-1 px-6 py-5">
           {children}
         </div>
       </div>

@@ -1,6 +1,10 @@
 import Modal from '../common/Modal';
-import { FileText, Image, FileSpreadsheet, Send, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { FileText, FileSpreadsheet, Send, CheckCircle2, Save } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { Select } from '../common/FormField';
+import { SearchableSelect } from './RfiStage1Modal';
+import { TAG_SYNC_GROUPS, getTagOptionGroupKey, splitTagIds } from './RfiTagOptions';
 
 function Field({ label, value }) {
   if (!value && value !== 0) return null;
@@ -57,15 +61,53 @@ function Section({ number, title, color = 'bg-orange-500', children }) {
 const STAGE_LABELS = ['', 'Create Request', 'Issue to Client', 'Onsite Inspection', 'Complete Document'];
 const STAGE_COLORS = ['', 'bg-orange-500', 'bg-blue-500', 'bg-purple-500', 'bg-green-500'];
 
-export default function RfiDetailModal({ rfi, onClose }) {
-  const { updateRfi } = useApp();
+export default function RfiDetailModal({ rfi, onClose, editTag = false }) {
+  const { updateRfi, tagOptions } = useApp();
   const emailOk = rfi.stage2EmailStatus === 'ok';
+  const projectId = rfi.projectId;
+  const inferredTagGroupKey = useMemo(() => {
+    if (rfi.tagGroupKey) return rfi.tagGroupKey;
+    const normalizedTag = String(splitTagIds(rfi.tagNo)[0] || '').toLocaleLowerCase();
+    if (!normalizedTag) return '';
+    const matchedOption = (tagOptions || []).find((item) => (
+      item.projectId === projectId &&
+      item.field === 'tagNo' &&
+      String(item.value || '').trim().toLocaleLowerCase() === normalizedTag
+    ));
+    return getTagOptionGroupKey(matchedOption);
+  }, [projectId, rfi.tagGroupKey, rfi.tagNo, tagOptions]);
+  const [tagForm, setTagForm] = useState(() => ({
+    tagGroupKey: inferredTagGroupKey,
+    tagNo: rfi.tagNo || '',
+  }));
+
+  const tagNoOptions = useMemo(() => {
+    if (!tagForm.tagGroupKey) return splitTagIds(tagForm.tagNo);
+    return [...new Set((tagOptions || [])
+      .filter((item) => {
+        if (item.projectId !== projectId || item.field !== 'tagNo' || item.active === false) return false;
+        const groupKey = getTagOptionGroupKey(item);
+        return groupKey === tagForm.tagGroupKey || (item.source === 'manual' && !groupKey);
+      })
+      .map((item) => String(item.value || '').trim())
+      .filter(Boolean)
+      .concat(splitTagIds(tagForm.tagNo)))]
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+  }, [projectId, tagForm.tagGroupKey, tagForm.tagNo, tagOptions]);
 
   function markEmailSent() {
     updateRfi(rfi.id, {
       stage2EmailStatus: 'ok',
       stage2EmailSentAt: new Date().toISOString(),
     });
+  }
+
+  function saveTag() {
+    updateRfi(rfi.id, {
+      tagGroupKey: tagForm.tagGroupKey,
+      tagNo: tagForm.tagNo,
+    });
+    onClose();
   }
 
   return (
@@ -124,6 +166,35 @@ export default function RfiDetailModal({ rfi, onClose }) {
         <Section number="1" title="RFI Request (Stage 1)">
           <Field label="Request No."      value={rfi.requestNo} />
           <Field label="RFI No."          value={rfi.rfiNo} />
+          {editTag ? (
+            <div className="col-span-2 rounded-lg border border-blue-200 bg-blue-50/60 p-2.5">
+              <span className="mb-1.5 block text-[9px] font-semibold uppercase tracking-wider text-blue-700">Tag ID</span>
+              <div className="grid grid-cols-2 gap-2">
+                <Select
+                  value={tagForm.tagGroupKey}
+                  onChange={(event) => setTagForm({ tagGroupKey: event.target.value, tagNo: '' })}
+                  aria-label="Select Tag group"
+                >
+                  <option value="">— Select Sync Group —</option>
+                  {TAG_SYNC_GROUPS.map((group) => (
+                    <option key={group.key} value={group.key}>
+                      {group.label} — Column {group.column}
+                    </option>
+                  ))}
+                </Select>
+                <SearchableSelect
+                  value={tagForm.tagNo}
+                  options={tagNoOptions}
+                  onChange={(tagNo) => setTagForm((current) => ({ ...current, tagNo }))}
+                  placeholder={tagForm.tagGroupKey ? '— Search / Select Tag ID —' : '— Select Sync Group first —'}
+                  multiple
+                />
+              </div>
+              <p className="mt-1.5 text-[10px] text-blue-600">Only Tag ID can be edited in this mode.</p>
+            </div>
+          ) : (
+            <Field label="Tag ID" value={rfi.tagNo} />
+          )}
           <Field label="Type of Inspection" value={rfi.typeOfInspection} />
           <Field label="Request Date (Internal)"  value={rfi.requestDateInternal} />
           <Field label="Request Time (Internal)"  value={rfi.requestTimeInternal} />
@@ -173,7 +244,7 @@ export default function RfiDetailModal({ rfi, onClose }) {
                       </>
                     )}
                   </div>
-                  {rfi.stage === 2 && !emailOk && (
+                  {rfi.stage === 2 && !emailOk && !editTag && (
                     <button
                       type="button"
                       onClick={markEmailSent}
@@ -434,7 +505,17 @@ export default function RfiDetailModal({ rfi, onClose }) {
         )}
       </div>
 
-      <div className="mt-4 pt-3 border-t border-slate-200 flex justify-end">
+      <div className="mt-4 pt-3 border-t border-slate-200 flex justify-end gap-2">
+        {editTag && (
+          <button
+            type="button"
+            onClick={saveTag}
+            className="flex items-center gap-1 px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+          >
+            <Save size={13} />
+            Save Tag ID
+          </button>
+        )}
         <button 
           onClick={onClose}
           className="flex items-center gap-1 px-4 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg border border-slate-300 hover:border-slate-400 transition-colors"

@@ -13,6 +13,8 @@ import { Upload, X, Loader2, Paperclip, FileText, Image, FileSpreadsheet, Plus, 
 const CATEGORIES = ['Structural', 'Architectural', 'Mechanical', 'Electrical', 'Civil', 'HVAC', 'Plumbing', 'Landscape', 'Other'];
 const CATEGORY_GROUPS = ['Work method', 'Material approved', 'Drawing'];
 const STATUSES   = ['Approved', 'For Construction', 'For Review', 'For Approve', 'As-Built', 'Superseded', 'Void'];
+const CATEGORY_GROUP_STORAGE_KEY = 'cmg-qc-doc-category-group-options';
+const CATEGORY_STORAGE_KEY = 'cmg-qc-doc-category-options';
 const STATUS_STORAGE_KEY = 'cmg-qc-doc-status-options';
 
 const ALLOWED_MIME = [
@@ -28,20 +30,24 @@ function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function readStoredStatusOptions() {
-  if (typeof window === 'undefined') return [...STATUSES];
+function readStoredOptions(storageKey, defaultOptions) {
+  if (typeof window === 'undefined') return [...defaultOptions];
   try {
-    const raw = window.localStorage.getItem(STATUS_STORAGE_KEY);
-    if (!raw) return [...STATUSES];
+    const raw = window.localStorage.getItem(storageKey);
+    if (!raw) return [...defaultOptions];
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [...STATUSES];
+    if (!Array.isArray(parsed)) return [...defaultOptions];
     const cleaned = parsed
       .map((item) => String(item || '').trim())
       .filter(Boolean);
-    return cleaned.length ? [...new Set(cleaned)] : [...STATUSES];
+    return cleaned.length ? [...new Set(cleaned)] : [...defaultOptions];
   } catch {
-    return [...STATUSES];
+    return [...defaultOptions];
   }
+}
+
+function readStoredStatusOptions() {
+  return readStoredOptions(STATUS_STORAGE_KEY, STATUSES);
 }
 
 /**
@@ -287,6 +293,18 @@ export default function QcDocModal({ doc, onSave, onClose, projectDocs = [], isD
   const [docUploading,  setDocUploading]  = useState(false);
   const [docUploadProg, setDocUploadProg] = useState(0);
   const docFileInputRef = useRef(null);
+  const [categoryGroupOptions, setCategoryGroupOptions] = useState(() => {
+    const base = readStoredOptions(CATEGORY_GROUP_STORAGE_KEY, CATEGORY_GROUPS);
+    const current = String(doc?.categoryGroup || '').trim();
+    if (current && !base.includes(current)) base.unshift(current);
+    return base;
+  });
+  const [categoryOptions, setCategoryOptions] = useState(() => {
+    const base = readStoredOptions(CATEGORY_STORAGE_KEY, CATEGORIES);
+    const current = String(doc?.category || '').trim();
+    if (current && !base.includes(current)) base.unshift(current);
+    return base;
+  });
   const [statusOptions, setStatusOptions] = useState(() => {
     const base = readStoredStatusOptions();
     const current = String(doc?.status || '').trim();
@@ -301,6 +319,16 @@ export default function QcDocModal({ doc, onSave, onClose, projectDocs = [], isD
     if (typeof window === 'undefined') return;
     window.localStorage.setItem(STATUS_STORAGE_KEY, JSON.stringify(statusOptions));
   }, [statusOptions]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(CATEGORY_GROUP_STORAGE_KEY, JSON.stringify(categoryGroupOptions));
+  }, [categoryGroupOptions]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(CATEGORY_STORAGE_KEY, JSON.stringify(categoryOptions));
+  }, [categoryOptions]);
 
   async function handleDocFileUpload(fileList) {
     if (!trNo || !selectedProjectId) {
@@ -377,6 +405,24 @@ export default function QcDocModal({ doc, onSave, onClose, projectDocs = [], isD
     const nextOptions = statusOptions.filter((item) => item !== current);
     setStatusOptions(nextOptions);
     setForm((prev) => ({ ...prev, status: nextOptions[0] || '' }));
+  }
+
+  function addSelectOption(field, label, setOptions) {
+    const val = window.prompt(`เพิ่มรายการ ${label}`);
+    const next = String(val || '').trim();
+    if (!next) return;
+    setOptions((prev) => (prev.includes(next) ? prev : [...prev, next]));
+    setForm((prev) => ({ ...prev, [field]: next }));
+  }
+
+  function removeSelectOption(field, label, options, setOptions) {
+    const current = String(form[field] || '').trim();
+    if (!current) return;
+    const ok = window.confirm(`ลบรายการนี้ออกจาก ${label}?\n\n"${current}"`);
+    if (!ok) return;
+    const nextOptions = options.filter((item) => item !== current);
+    setOptions(nextOptions);
+    setForm((prev) => ({ ...prev, [field]: nextOptions[0] || '' }));
   }
 
   async function handleSubmit(e) {
@@ -662,15 +708,42 @@ export default function QcDocModal({ doc, onSave, onClose, projectDocs = [], isD
         {/* Category Group / Category / Status / Delivery */}
         <FormGrid cols={4}>
           <FormField label="Category Group หลัก">
-            <Select value={form.categoryGroup || ''} onChange={setField('categoryGroup')}>
-              <option value="">— เลือก —</option>
-              {CATEGORY_GROUPS.map(g => <option key={g}>{g}</option>)}
-            </Select>
+            <div className="flex items-center gap-2">
+              <Select value={form.categoryGroup || ''} onChange={setField('categoryGroup')}>
+                <option value="">— เลือก —</option>
+                {categoryGroupOptions.map(g => <option key={g} value={g}>{g}</option>)}
+              </Select>
+              <button type="button" onClick={() => addSelectOption('categoryGroup', 'Category Group หลัก', setCategoryGroupOptions)}
+                className="w-9 h-9 shrink-0 rounded-lg border border-slate-200 bg-white hover:border-orange-400 hover:bg-orange-50 flex items-center justify-center transition-colors"
+                title="เพิ่มรายการ Category Group หลัก">
+                <Plus size={16} className="text-slate-600" />
+              </button>
+              <button type="button" onClick={() => removeSelectOption('categoryGroup', 'Category Group หลัก', categoryGroupOptions, setCategoryGroupOptions)}
+                disabled={!form.categoryGroup}
+                className="w-9 h-9 shrink-0 rounded-lg border border-slate-200 bg-white hover:border-red-400 hover:bg-red-50 flex items-center justify-center transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                title="ลบรายการ Category Group หลักที่เลือก">
+                <Trash2 size={16} className="text-slate-600" />
+              </button>
+            </div>
           </FormField>
           <FormField label="Category">
-            <Select value={form.category} onChange={setField('category')}>
-              {CATEGORIES.map(c => <option key={c}>{c}</option>)}
-            </Select>
+            <div className="flex items-center gap-2">
+              <Select value={form.category || ''} onChange={setField('category')}>
+                <option value="">— Select —</option>
+                {categoryOptions.map(c => <option key={c} value={c}>{c}</option>)}
+              </Select>
+              <button type="button" onClick={() => addSelectOption('category', 'Category', setCategoryOptions)}
+                className="w-9 h-9 shrink-0 rounded-lg border border-slate-200 bg-white hover:border-orange-400 hover:bg-orange-50 flex items-center justify-center transition-colors"
+                title="เพิ่มรายการ Category">
+                <Plus size={16} className="text-slate-600" />
+              </button>
+              <button type="button" onClick={() => removeSelectOption('category', 'Category', categoryOptions, setCategoryOptions)}
+                disabled={!form.category}
+                className="w-9 h-9 shrink-0 rounded-lg border border-slate-200 bg-white hover:border-red-400 hover:bg-red-50 flex items-center justify-center transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                title="ลบรายการ Category ที่เลือก">
+                <Trash2 size={16} className="text-slate-600" />
+              </button>
+            </div>
           </FormField>
           <FormField label="Status">
             <div className="flex items-center gap-2">

@@ -81,10 +81,14 @@ function ColumnFilterDropdown({ colKey, label, allDocs, activeValues, onChange }
   const [search, setSearch] = useState('');
   const ref                 = useRef(null);
 
-  // Unique non-empty values for this column
+  // Unique values for this column. Category Group also exposes blank values so
+  // documents without a group can be filtered explicitly.
   const options = useMemo(() => {
     const set = new Set();
-    allDocs.forEach(d => { const v = getDocFieldValue(d, colKey); if (v) set.add(v); });
+    allDocs.forEach(d => {
+      const value = getDocFieldValue(d, colKey);
+      if (value || colKey === 'catGroup') set.add(value);
+    });
     return [...set].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   }, [allDocs, colKey]);
 
@@ -134,7 +138,7 @@ function ColumnFilterDropdown({ colKey, label, allDocs, activeValues, onChange }
           {options.length > 6 && (
             <div className="px-2 pt-2">
               <input
-                className="w-full text-[10px] px-2 py-1 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-orange-400"
+                className="w-full bg-white text-slate-700 placeholder:text-slate-400 text-[10px] px-2 py-1 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-orange-400"
                 placeholder="Search…"
                 value={search}
                 onChange={e => setSearch(e.target.value)}

@@ -818,6 +818,7 @@ export default function RfiPage() {
   const [stage3Modal,   setStage3Modal]  = useState(null);
   const [stage4Modal,   setStage4Modal]  = useState(null);
   const [detailModal,   setDetailModal]  = useState(null);
+  const [detailTagEdit, setDetailTagEdit] = useState(false);
   const [editTarget,    setEditTarget]   = useState(null);
   const [deleteTarget,  setDeleteTarget] = useState(null);
   const uploadInputRefs = useRef({});
@@ -934,6 +935,17 @@ export default function RfiPage() {
     if (rfi.stage === 2) setStage2Modal(rfi);
     if (rfi.stage === 3) setStage3Modal(rfi);
     if (rfi.stage === 4) setStage4Modal(rfi);
+  }
+
+  function openTagEdit(rfi) {
+    if (!canEditRfi) return;
+    setDetailTagEdit(true);
+    setDetailModal(rfi);
+  }
+
+  function closeDetailModal() {
+    setDetailModal(null);
+    setDetailTagEdit(false);
   }
 
   function handleDelete(rfi) {
@@ -1257,7 +1269,10 @@ export default function RfiPage() {
                     <tr 
                       key={rfi.id} 
                       className={`transition-colors cursor-pointer select-none group ${rowClass}`}
-                      onDoubleClick={() => setDetailModal(rfi)}
+                      onDoubleClick={() => {
+                        setDetailTagEdit(false);
+                        setDetailModal(rfi);
+                      }}
                       title="Double-click to view details"
                     >
                       <td className={`px-3 py-0.5 font-mono text-xs ${concreteAlerts.hasPendingAlert ? 'text-red-500' : 'text-slate-400'}`}>{idx + 1}</td>
@@ -1376,12 +1391,24 @@ export default function RfiPage() {
                           return (
                             <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                               <button
-                                onClick={() => setDetailModal(rfi)}
+                                onClick={() => {
+                                  setDetailTagEdit(false);
+                                  setDetailModal(rfi);
+                                }}
                                 className="w-5 h-5 rounded bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition-colors"
                                 title="View detail"
                               >
                                 <Eye size={9} className="text-slate-600" />
                               </button>
+                              {canEditRfi && (
+                                <button
+                                  onClick={() => openTagEdit(rfi)}
+                                  className="w-5 h-5 rounded bg-sky-100 hover:bg-sky-200 flex items-center justify-center transition-colors"
+                                  title="Edit Tag ID"
+                                >
+                                  <Pencil size={9} className="text-sky-700" />
+                                </button>
+                              )}
                               {canEdit && (
                                 <button
                                   onClick={() => openEdit(rfi)}
@@ -1463,7 +1490,8 @@ export default function RfiPage() {
       {detailModal && (
         <RfiDetailModal
           rfi={rfiItems.find(r => r.id === detailModal.id) || detailModal}
-          onClose={() => setDetailModal(null)}
+          editTag={detailTagEdit}
+          onClose={closeDetailModal}
         />
       )}
       {deleteTarget && (

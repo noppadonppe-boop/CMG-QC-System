@@ -71,11 +71,81 @@ function buildOptionDocId(projectId, field, value) {
   return `${projectId}__${field}__${encodeURIComponent(normalizedValue)}`;
 }
 
+function parseSingleColumnCsv(csvText) {
+  const values = [];
+  let field = "";
+  let inQuotes = false;
+
+  for (let index = 0; index < csvText.length; index++) {
+    const char = csvText[index];
+    if (char === '"') {
+      if (inQuotes && csvText[index + 1] === '"') {
+        field += '"';
+        index++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if ((char === "\n" || char === "\r") && !inQuotes) {
+      values.push(field);
+      field = "";
+      if (char === "\r" && csvText[index + 1] === "\n") index++;
+    } else {
+      field += char;
+    }
+  }
+
+  if (field) values.push(field);
+  return values;
+}
+
+function parseGoogleSheetReference(sheetUrl, spreadsheetId, gid) {
+  let resolvedSpreadsheetId = String(spreadsheetId || "").trim();
+  let resolvedGid = String(gid || "").trim();
+
+  if (sheetUrl) {
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(sheetUrl);
+    } catch {
+      throw new Error("invalid-sheet-url");
+    }
+    if (parsedUrl.hostname !== "docs.google.com") throw new Error("invalid-sheet-url");
+    const idMatch = parsedUrl.pathname.match(/^\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+    if (!idMatch) throw new Error("invalid-sheet-url");
+    resolvedSpreadsheetId = idMatch[1];
+    resolvedGid = parsedUrl.searchParams.get("gid") || resolvedGid;
+  }
+
+  if (!/^[a-zA-Z0-9_-]+$/.test(resolvedSpreadsheetId)) {
+    throw new Error("invalid-spreadsheet-id");
+  }
+  if (!/^\d+$/.test(resolvedGid)) throw new Error("invalid-sheet-gid");
+  return {spreadsheetId: resolvedSpreadsheetId, gid: resolvedGid};
+}
+
+async function commitFirestoreOperations(operations) {
+  for (let index = 0; index < operations.length; index += 450) {
+    const batch = admin.firestore().batch();
+    for (const operation of operations.slice(index, index + 450)) operation(batch);
+    await batch.commit();
+  }
+}
+
+async function isAuthenticatedRequest(req, suppliedSecret) {
+  const configuredSecret = getTagSyncSecret();
+  if (configuredSecret && suppliedSecret === configuredSecret) return true;
+
+  const authorization = String(req.get("Authorization") || "");
+  if (!authorization.startsWith("Bearer ")) return false;
+  const decodedToken = await admin.auth().verifyIdToken(authorization.slice(7));
+  return Boolean(decodedToken?.uid);
+}
+
 exports.syncGoogleSheetTagNos = functions
   .region("asia-southeast1")
   .https.onRequest(async (req, res) => {
     res.set("Access-Control-Allow-Origin", "*");
-    res.set("Access-Control-Allow-Headers", "Content-Type");
+    res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
     res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
 
     if (req.method === "OPTIONS") {
@@ -88,12 +158,6 @@ exports.syncGoogleSheetTagNos = functions
       return;
     }
 
-    const configuredSecret = getTagSyncSecret();
-    if (!configuredSecret) {
-      res.status(500).json({ ok: false, error: "missing-tag-sync-secret" });
-      return;
-    }
-
     const {
       secret,
       projectId,
@@ -102,11 +166,20 @@ exports.syncGoogleSheetTagNos = functions
       prefix = "",
       building = "",
       spreadsheetId = "",
+      sheetUrl = "",
+      gid = "",
       sheetName = "",
-      range = "D3:D",
+      range = "D2:D",
+      skipHeader = false,
     } = req.body || {};
 
-    if (secret !== configuredSecret) {
+    let authenticated = false;
+    try {
+      authenticated = await isAuthenticatedRequest(req, secret);
+    } catch (error) {
+      console.error("Tag sync authentication failed", error);
+    }
+    if (!authenticated) {
       res.status(401).json({ ok: false, error: "unauthorized" });
       return;
     }
@@ -116,8 +189,44 @@ exports.syncGoogleSheetTagNos = functions
       return;
     }
 
+    if (!/^[A-Z]+\d*:[A-Z]+\d*$/i.test(range)) {
+      res.status(400).json({ok: false, error: "invalid-range"});
+      return;
+    }
+
+    let incomingValues = Array.isArray(values) ? values : tags;
+    let resolvedSpreadsheetId = String(spreadsheetId || "").trim();
+    let resolvedGid = String(gid || "").trim();
+
+    try {
+      if (!Array.isArray(incomingValues)) {
+        const reference = parseGoogleSheetReference(sheetUrl, spreadsheetId, gid);
+        resolvedSpreadsheetId = reference.spreadsheetId;
+        resolvedGid = reference.gid;
+        const csvUrl = new URL(`https://docs.google.com/spreadsheets/d/${resolvedSpreadsheetId}/gviz/tq`);
+        csvUrl.searchParams.set("tqx", "out:csv");
+        csvUrl.searchParams.set("gid", resolvedGid);
+        csvUrl.searchParams.set("range", range);
+        const sheetResponse = await fetch(csvUrl.toString(), {redirect: "follow"});
+        const contentType = sheetResponse.headers.get("content-type") || "";
+        if (!sheetResponse.ok || !contentType.includes("text/csv")) {
+          throw new Error(`sheet-not-readable:${sheetResponse.status}`);
+        }
+        incomingValues = parseSingleColumnCsv(await sheetResponse.text());
+        if (skipHeader) incomingValues = incomingValues.slice(1);
+      }
+    } catch (error) {
+      console.error("Failed to read Google Sheet", error);
+      res.status(502).json({
+        ok: false,
+        error: "sheet-not-readable",
+        message: "Google Sheet must be shared as Anyone with the link (Viewer).",
+      });
+      return;
+    }
+
     const appliedPrefix = String(prefix || building || "").trim();
-    const preparedTags = sanitizeTagValues(Array.isArray(values) ? values : tags, appliedPrefix);
+    const preparedTags = sanitizeTagValues(incomingValues, appliedPrefix);
     const collectionRef = admin.firestore()
       .collection("QC-System")
       .doc("root")
@@ -129,19 +238,30 @@ exports.syncGoogleSheetTagNos = functions
       .get();
 
     const now = admin.firestore.FieldValue.serverTimestamp();
-    const batch = admin.firestore().batch();
-    const existingDocIds = new Set(existingSnapshot.docs.map((docSnap) => docSnap.id));
+    const existingById = new Map(existingSnapshot.docs.map((docSnap) => [docSnap.id, docSnap.data()]));
+    const incomingDocIds = new Set();
+    const operations = [];
     let created = 0;
     let skipped = 0;
+    let deactivated = 0;
 
     for (const item of preparedTags) {
       const docId = buildOptionDocId(projectId, "tagNo", item.value);
       if (!docId) continue;
-      if (existingDocIds.has(docId)) {
+      incomingDocIds.add(docId);
+      if (existingById.has(docId)) {
         skipped++;
+        const existing = existingById.get(docId);
+        if (existing.source === "google-sheet") {
+          operations.push((batch) => batch.set(collectionRef.doc(docId), {
+            active: true,
+            syncedAt: now,
+            updatedAt: now,
+          }, {merge: true}));
+        }
         continue;
       }
-      batch.set(collectionRef.doc(docId), {
+      operations.push((batch) => batch.set(collectionRef.doc(docId), {
         projectId,
         field: "tagNo",
         value: item.value,
@@ -151,17 +271,35 @@ exports.syncGoogleSheetTagNos = functions
         normalizedValue: item.normalizedValue,
         active: true,
         source: "google-sheet",
-        spreadsheetId,
+        spreadsheetId: resolvedSpreadsheetId,
+        gid: resolvedGid,
         sheetName,
         range,
         syncedAt: now,
         createdAt: now,
         updatedAt: now,
-      }, { merge: true });
+      }, { merge: true }));
       created++;
     }
 
-    await batch.commit();
+    for (const docSnap of existingSnapshot.docs) {
+      const data = docSnap.data();
+      if (
+        data.source === "google-sheet" &&
+        data.spreadsheetId === resolvedSpreadsheetId &&
+        !incomingDocIds.has(docSnap.id) &&
+        data.active !== false
+      ) {
+        operations.push((batch) => batch.set(docSnap.ref, {
+          active: false,
+          syncedAt: now,
+          updatedAt: now,
+        }, {merge: true}));
+        deactivated++;
+      }
+    }
+
+    await commitFirestoreOperations(operations);
 
     res.status(200).json({
       ok: true,
@@ -170,6 +308,7 @@ exports.syncGoogleSheetTagNos = functions
       received: preparedTags.length,
       created,
       skipped,
+      deactivated,
     });
   });
 
