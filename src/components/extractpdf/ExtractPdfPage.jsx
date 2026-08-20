@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { FileUp, Send, Trash2, CheckCircle2, XCircle, Loader2, AlertCircle, FileText, FolderOpen, ArrowLeft, Plus, Download, ArrowUp, ArrowDown, X, Pencil, RefreshCw, Check, ZoomIn, ZoomOut, Maximize, Expand } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { PDFDocument } from 'pdf-lib';
@@ -9,7 +9,7 @@ import { useApp } from '../../context/AppContext';
 // ใช้ worker จาก unpkg (รองรับ pdfjs-dist v5+)
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
 
-const N8N_WEBHOOK_URL = import.meta.env.VITE_N8N_WEBHOOK_URL || '';
+const N8N_WEBHOOK_URL = import.meta.env.VITE_N8N_WEBHOOK_URL || 'https://n8n.cmg1.online/webhook/extractpdf';
 
 // สถานะของแต่ละ row
 const STATUS = {
@@ -27,30 +27,6 @@ const CALC_STATUS = {
   CALCULATED:  'calculated',    // คำนวนแล้ว
   CALC_ERROR:  'calc_error',    // คำนวนผิดพลาด
 };
-
-function StatusBadge({ status, message }) {
-  if (status === STATUS.PENDING)
-    return <span className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-500 shadow-sm">รอส่ง</span>;
-  if (status === STATUS.SENDING)
-    return (
-      <span className="inline-flex items-center justify-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-700">
-        <Loader2 size={12} className="animate-spin" /> กำลังส่ง…
-      </span>
-    );
-  if (status === STATUS.SUCCESS)
-    return (
-      <span className="inline-flex items-center justify-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
-        <CheckCircle2 size={12} /> สำเร็จ
-      </span>
-    );
-  if (status === STATUS.ERROR)
-    return (
-      <span className="inline-flex items-center justify-center gap-1 rounded-full border border-red-200 bg-red-50 px-2.5 py-1 text-[11px] font-semibold text-red-700" title={message}>
-        <XCircle size={12} /> ผิดพลาด
-      </span>
-    );
-  return null;
-}
 
 function CalcStatusBadge({ calcStatus, message }) {
   if (calcStatus === CALC_STATUS.WAITING)
@@ -109,22 +85,26 @@ export default function ExtractPdfPage() {
   const downloadPdfInputRef = useRef(null); // ref สำหรับ input เลือกไฟล์ PDF เพื่อดาวน์โหลด
 
   // UI state
-  const [fileName, setFileName] = useState('');
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [isSending, setIsSending] = useState(false);
   const [isCalculating, setIsCalculating] = useState(false);
   const [reviewRowId, setReviewRowId] = useState(null); // ID แถวที่กำลังรีวิวใน Modal
-  const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [calcProgress, setCalcProgress] = useState({ current: 0, total: 0 });
   const [thumbnailProgress, setThumbnailProgress] = useState({ current: 0, total: 0 });
   const fileInputRef = useRef(null);
-  const pdfFileRef = useRef(null); // เก็บไฟล์ PDF ดั้งเดิมไว้ในหน่วยความจำ
+  // Cache เฉพาะไฟล์ของโฟลเดอร์ปัจจุบัน เพื่อไม่ให้ไฟล์จากโฟลเดอร์ก่อนหน้าถูกนำไปใช้ต่อ
+  const pdfFileRef = useRef({ folderId: null, file: null });
+  const extractPdfItemsRef = useRef(extractPdfItems);
 
   // Deletion states
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteStatus, setDeleteStatus] = useState('');
+
+  // ใช้ข้อมูล realtime ล่าสุดจาก Firestore ระหว่างรอผลคำนวณทีละหน้า
+  useEffect(() => {
+    extractPdfItemsRef.current = extractPdfItems;
+  }, [extractPdfItems]);
 
   // โหลดข้อมูลจาก Firestore
   useEffect(() => {
@@ -190,8 +170,6 @@ export default function ExtractPdfPage() {
   // ── แปลง PDF เป็น list of rows ──────────────────────────────────────────
   async function processPdf(file) {
     setIsProcessing(true);
-    setFileName(file.name);
-    setProgress({ current: 0, total: 0 });
     setThumbnailProgress({ current: 0, total: 0 });
 
     try {
@@ -263,8 +241,9 @@ export default function ExtractPdfPage() {
 
       console.log(`✅ Created ${totalPages} pages in Firestore`);
       
-      // 5. เก็บไฟล์ PDF ไว้ในหน่วยความจำเพื่อใช้ตอนคำนวน
-      pdfFileRef.current = file;
+      // 5. เก็บไฟล์ไว้ใช้เฉพาะงานดาวน์โหลดของโฟลเดอร์นี้
+      // การคำนวนจะอ่านไฟล์จาก Firebase Storage ผ่าน Cloud Function โดยตรง
+      pdfFileRef.current = { folderId, file };
       
       // 6. เข้าสู่โฟลเดอร์ที่สร้าง
       setCurrentFolder({
@@ -273,6 +252,7 @@ export default function ExtractPdfPage() {
         fileName: file.name,
         totalPages: totalPages,
         pdfUrl: pdfUrl,
+        pdfStoragePath: pdfPath,
         createdAt: folderData.createdAt,
         pages: newRows,
       });
@@ -282,7 +262,6 @@ export default function ExtractPdfPage() {
     } catch (err) {
       console.error('Failed to process PDF', err);
       alert('ไม่สามารถแยกหน้า PDF ได้ กรุณาลองไฟล์อื่น');
-      setFileName('');
       setThumbnailProgress({ current: 0, total: 0 });
     } finally {
       setIsProcessing(false);
@@ -318,18 +297,18 @@ export default function ExtractPdfPage() {
   }
 
   // ── Drag & Drop ──────────────────────────────────────────────────────────
-  const handleDrop = useCallback(async (e) => {
+  const handleDrop = async (e) => {
     e.preventDefault();
     setIsDragging(false);
     const file = e.dataTransfer.files?.[0];
     if (file?.type === 'application/pdf') await processPdf(file);
-  }, []);
+  };
 
-  const handleFileChange = useCallback(async (e) => {
+  const handleFileChange = async (e) => {
     const file = e.target.files?.[0];
     if (file?.type === 'application/pdf') await processPdf(file);
     e.target.value = '';
-  }, []);
+  };
 
   // ── อัปเดต field ใน row ──────────────────────────────────────────────────
   async function updateRow(id, field, value) {
@@ -430,7 +409,9 @@ export default function ExtractPdfPage() {
     if (selectedRowIds.length === 0) return;
 
     // ตรวจสอบว่ามีไฟล์ PDF ในหน่วยความจำหรือไม่
-    let pdfFile = pdfFileRef.current;
+    let pdfFile = pdfFileRef.current.folderId === currentFolder?.id
+      ? pdfFileRef.current.file
+      : null;
 
     // ถ้าไม่มีไฟล์ในหน่วยความจำ → โหลดจาก Firebase Storage โดยตรงผ่าน SDK (ไม่ติด CORS)
     if (!pdfFile) {
@@ -461,7 +442,7 @@ export default function ExtractPdfPage() {
           ]);
           
           pdfFile = new File([blob], currentFolder.fileName || 'document.pdf', { type: 'application/pdf' });
-          pdfFileRef.current = pdfFile;
+          pdfFileRef.current = { folderId: currentFolder.id, file: pdfFile };
           console.log('✅ PDF downloaded from Firebase Storage via SDK');
         } catch (storageErr) {
           if (storageErr.message === 'TIMEOUT_CORS') {
@@ -491,7 +472,7 @@ export default function ExtractPdfPage() {
     if (!file) return;
     e.target.value = ''; // reset input
 
-    pdfFileRef.current = file;
+    pdfFileRef.current = { folderId: currentFolder?.id || null, file };
     setNeedsPdfFile(false);
 
     // เริ่มดาวน์โหลดอัตโนมัติหลังเลือกไฟล์
@@ -570,20 +551,6 @@ export default function ExtractPdfPage() {
     }
   }
 
-  // ── แปลง PDF page เป็น base64 PNG ────────────────────────────────────────
-  async function renderPageToBase64(pdfFile, pageNum) {
-    const arrayBuffer = await pdfFile.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-    const page = await pdf.getPage(pageNum);
-    const viewport = page.getViewport({ scale: 2.0 });
-    const canvas = document.createElement('canvas');
-    canvas.width  = viewport.width;
-    canvas.height = viewport.height;
-    const ctx = canvas.getContext('2d');
-    await page.render({ canvasContext: ctx, viewport }).promise;
-    return canvas.toDataURL('image/png').split(',')[1]; // base64 only
-  }
-
   // ── แยก PDF เป็นหน้าเดียวและคืนค่าเป็น Uint8Array ────────────────────────────────
   async function extractSinglePagePdfFromBlob(pdfBlob, pageNum) {
     try {
@@ -609,63 +576,34 @@ export default function ExtractPdfPage() {
     }
   }
 
-  // ── ส่งทีละ row ──────────────────────────────────────────────────────────
-  async function sendAll() {
-    if (!N8N_WEBHOOK_URL) {
-      alert('กรุณาตั้งค่า VITE_N8N_WEBHOOK_URL ใน .env ก่อน');
-      return;
-    }
-    if (!rows.length) return;
+  function waitForCalculationResult(rowId, requestId, timeoutMs = 280_000) {
+    return new Promise((resolve, reject) => {
+      const startedAt = Date.now();
 
-    setIsSending(true);
-    setProgress({ current: 0, total: rows.length });
+      const checkResult = () => {
+        const latestRow = extractPdfItemsRef.current?.find(item => item.id === rowId);
+        const isCurrentRequest = latestRow?.calculationRequestId === requestId;
+        const isFinished = latestRow?.calcStatus === CALC_STATUS.CALCULATED
+          || latestRow?.calcStatus === CALC_STATUS.CALC_ERROR;
 
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i];
+        if (isCurrentRequest && isFinished) {
+          resolve(latestRow);
+          return;
+        }
 
-      // mark sending
-      setRows(prev => prev.map(r => r.id === row.id ? { ...r, status: STATUS.SENDING } : r));
+        if (Date.now() - startedAt >= timeoutMs) {
+          reject(new Error('หมดเวลารอผลคำนวณ ระบบหยุดคิวเพื่อไม่ให้หน้าถัดไปทำงานซ้อนกัน'));
+          return;
+        }
 
-      try {
-        const base64Image = await renderPageToBase64(row.pdfFile, row.page);
+        setTimeout(checkResult, 500);
+      };
 
-        const payload = {
-          fileName,
-          page:     row.page,
-          total:    row.total,
-          dwgNo:    row.dwgNo,
-          title:    row.title,
-          rev:      row.rev,
-          image:    base64Image,   // PNG base64 ของหน้านั้น
-        };
-
-        const res = await fetch(N8N_WEBHOOK_URL, {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify(payload),
-        });
-
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-        let responseData = null;
-        try { responseData = await res.json(); } catch { /* no body */ }
-
-        setRows(prev => prev.map(r =>
-          r.id === row.id ? { ...r, status: STATUS.SUCCESS, response: responseData } : r
-        ));
-      } catch (err) {
-        setRows(prev => prev.map(r =>
-          r.id === row.id ? { ...r, status: STATUS.ERROR, response: err.message } : r
-        ));
-      }
-
-      setProgress({ current: i + 1, total: rows.length });
-    }
-
-    setIsSending(false);
+      checkResult();
+    });
   }
 
-  // ── คำนวน — ใช้ไฟล์ PDF ในหน่วยความจำ (ถ้ามี) หรือให้เลือกไฟล์ใหม่ ──
+  // ── คำนวน — ส่งทีละหน้าและรอผลก่อนส่งหน้าถัดไป ──
   async function calculateAll() {
     if (!N8N_WEBHOOK_URL) {
       alert('กรุณาตั้งค่า VITE_N8N_WEBHOOK_URL ใน .env ก่อน');
@@ -673,110 +611,79 @@ export default function ExtractPdfPage() {
     }
 
     const waitingRows = rows.filter(r =>
-      r.calcStatus === CALC_STATUS.WAITING ||
-      r.calcStatus === CALC_STATUS.WAITING_CLOUD ||
-      r.calcStatus === CALC_STATUS.CALC_ERROR
+      r.calcStatus === CALC_STATUS.WAITING || r.calcStatus === CALC_STATUS.CALC_ERROR
     );
     if (!waitingRows.length) {
       alert('ไม่มีรายการที่รอคำนวน');
       return;
     }
 
-    // 1. หาไฟล์ PDF ที่ใช้งาน
-    let pdfFile = pdfFileRef.current;
-
-    if (!pdfFile) {
-      // ไม่มีไฟล์ในหน่วยความจำ (เช่น เปิดโฟลเดอร์เก่า) → ให้ผู้ใช้เลือกไฟล์ PDF อีกครั้ง
-      const confirmed = window.confirm(
-        'ไฟล์ PDF ไม่ได้อยู่ในหน่วยความจำ (อาจเป็นเพราะเปิดโฟลเดอร์เก่า)\n\n' +
-        'กรุณาเลือกไฟล์ PDF เดิมอีกครั้งเพื่อใช้ในการคำนวน\n\n' +
-        `ไฟล์ที่ต้องการ: ${currentFolder?.fileName || 'PDF file'}`
-      );
-      if (!confirmed) return;
-
-      pdfFile = await new Promise((resolve) => {
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = 'application/pdf';
-        input.onchange = (e) => resolve(e.target.files?.[0] || null);
-        input.click();
-      });
-
-      if (!pdfFile) {
-        alert('ไม่ได้เลือกไฟล์ PDF');
-        return;
-      }
-
-      // เก็บไว้ใช้ครั้งถัดไปโดยไม่ต้องเลือกใหม่
-      pdfFileRef.current = pdfFile;
-    }
-
     setIsCalculating(true);
     setCalcProgress({ current: 0, total: waitingRows.length });
 
-    const TIMEOUT_MS = 120_000; // 120 วินาที ต่อรายการ
-    let calcSuccessCount = 0;
-    let calcErrorCount = 0;
+    let successCount = 0;
+    let errorCount = 0;
+    let queueStopped = false;
+    const calculationErrors = [];
 
-    // 2. วนลูปทีละ 1 รายการ (queue)
+    // ส่ง 1 row แล้วรอจน Cloud Function/n8n จบ จึงเริ่ม row ถัดไป
     for (let i = 0; i < waitingRows.length; i++) {
       const row = waitingRows[i];
+      const calculationRequestId = `${Date.now()}-${row.id}-${i}`;
 
-      // อัปเดตสถานะ → กำลังคำนวน
-      const statusCalcing = { calcStatus: CALC_STATUS.CALCULATING, updatedAt: new Date().toISOString() };
-      setRows(prev => prev.map(r => r.id === row.id ? { ...r, ...statusCalcing } : r));
-      await updateExtractPdf(row.id, statusCalcing).catch(() => {});
+      const pdfStoragePath = row.pdfStoragePath || currentFolder?.pdfStoragePath || (
+        currentFolder?.id && currentFolder?.fileName
+          ? `extract-pdf/${selectedProjectId}/${currentFolder.id}/${currentFolder.fileName}`
+          : ''
+      );
 
       try {
-        // A. แยกหน้า PDF เดี่ยวจากไฟล์ในหน่วยความจำ
-        const singlePageBytes = await extractSinglePagePdfFromBlob(pdfFile, row.page);
-        const singlePageFileName = `${(row.fileName || 'page').replace('.pdf', '')}_page_${row.page}.pdf`;
+        if (!pdfStoragePath) {
+          throw new Error('ไม่พบที่อยู่ไฟล์ใน Firebase Storage');
+        }
 
-        // B. เตรียม FormData
-        const formData = new FormData();
-        formData.append('file', new Blob([singlePageBytes], { type: 'application/pdf' }), singlePageFileName);
-        formData.append('fileName', row.fileName || '');
-        formData.append('page', String(row.page));
-        formData.append('total', String(row.totalPages || 0));
-        formData.append('pageNumber', String(row.page));
-
-        // C. ส่งไปยัง n8n พร้อม timeout
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
-
-        const res = await fetch(N8N_WEBHOOK_URL, {
-          method: 'POST',
-          body: formData,
-          signal: controller.signal,
-        });
-        clearTimeout(timeoutId);
-
-        if (!res.ok) throw new Error(`n8n responded ${res.status}: ${res.statusText}`);
-
-        let responseData = null;
-        try { responseData = await res.json(); } catch { /* non-json */ }
-
-        const resp = responseData || {};
-        const dwgNo = resp.dwgNo || resp.dwgno || resp.DWG_NO || '';
-        const title = resp.title || resp.TITLE || '';
-        const rev   = resp.rev   || resp.REV   || '';
-
-        // D. สำเร็จ → อัปเดต local + Firestore
-        const ok = {
-          calcStatus: CALC_STATUS.CALCULATED,
-          dwgNo, title, rev,
-          calcResponse: responseData || null,
+        const updateData = {
+          calcStatus: CALC_STATUS.WAITING_CLOUD,
+          pdfStoragePath,
+          fileName: row.fileName || currentFolder?.fileName || '',
+          totalPages: row.totalPages || currentFolder?.totalPages || 0,
+          webhookUrl: N8N_WEBHOOK_URL,
+          calcResponse: null,
+          calculationRequestId,
+          calculationRequestedAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
-        setRows(prev => prev.map(r => r.id === row.id ? { ...r, ...ok } : r));
-        await updateExtractPdf(row.id, ok);
-        calcSuccessCount++;
-        console.log(`✅ Page ${row.page} OK:`, { dwgNo, title, rev });
 
+        setRows(prev => prev.map(r => r.id === row.id ? { ...r, ...updateData } : r));
+        await updateExtractPdf(row.id, updateData);
+
+        console.log(`⏳ Page ${row.page} started from ${pdfStoragePath}`);
+        const result = await waitForCalculationResult(row.id, calculationRequestId);
+
+        if (result.calcStatus === CALC_STATUS.CALCULATED) {
+          successCount++;
+          console.log(`✅ Page ${row.page} completed`);
+        } else {
+          const resultError = typeof result.calcResponse === 'string'
+            ? result.calcResponse
+            : 'คำนวณไม่สำเร็จ';
+          errorCount++;
+          calculationErrors.push(`หน้า ${row.page}: ${resultError}`);
+          console.error(`❌ Page ${row.page} failed: ${resultError}`);
+        }
       } catch (err) {
-        // Skip & ไปรายการถัดไป
-        const errMsg = err.name === 'AbortError' ? 'Timeout (120s)' : err.message;
-        console.warn(`⏭️ Page ${row.page} skipped:`, errMsg);
+        const errMsg = err.message || 'ไม่ทราบสาเหตุ';
+        errorCount++;
+        calculationErrors.push(`หน้า ${row.page}: ${errMsg}`);
+        console.error(`❌ Page ${row.page} queue stopped:`, err);
+
+        // หากหมดเวลารอ ห้ามส่งหน้าถัดไป เพราะงานเดิมอาจยังทำงานอยู่บนคลาวด์
+        if (/หมดเวลารอผลคำนวณ/.test(errMsg)) {
+          queueStopped = true;
+          setCalcProgress({ current: i + 1, total: waitingRows.length });
+          break;
+        }
+
         const fail = {
           calcStatus: CALC_STATUS.CALC_ERROR,
           calcResponse: errMsg,
@@ -784,27 +691,22 @@ export default function ExtractPdfPage() {
         };
         setRows(prev => prev.map(r => r.id === row.id ? { ...r, ...fail } : r));
         await updateExtractPdf(row.id, fail).catch(() => {});
-        calcErrorCount++;
       }
 
       setCalcProgress({ current: i + 1, total: waitingRows.length });
     }
 
     setIsCalculating(false);
-    alert(`คำนวนเสร็จสิ้น!\nสำเร็จ: ${calcSuccessCount} รายการ\nล้มเหลว/Timeout: ${calcErrorCount} รายการ`);
+    const errorSummary = calculationErrors.length
+      ? `\n\nรายละเอียด:\n${calculationErrors.slice(0, 3).join('\n')}${calculationErrors.length > 3 ? `\nและอีก ${calculationErrors.length - 3} รายการ` : ''}`
+      : '';
+    const stoppedMessage = queueStopped ? '\nคิวถูกหยุดเพื่อป้องกันงานซ้อนกัน' : '';
+    alert(`คำนวณแบบทีละหน้าเสร็จแล้ว\nสำเร็จ: ${successCount} รายการ\nผิดพลาด: ${errorCount} รายการ${stoppedMessage}${errorSummary}`);
   }
 
-  // ── Clear ────────────────────────────────────────────────────────────────
-  function clearAll() {
-    setRows([]);
-    setFileName('');
-    setProgress({ current: 0, total: 0 });
-    setCalcProgress({ current: 0, total: 0 });
-  }
-
-  const successCount = rows.filter(r => r.status === STATUS.SUCCESS).length;
-  const errorCount   = rows.filter(r => r.status === STATUS.ERROR).length;
-  const waitingCalcCount = rows.filter(r => r.calcStatus === CALC_STATUS.WAITING).length;
+  const waitingCalcCount = rows.filter(r =>
+    r.calcStatus === CALC_STATUS.WAITING || r.calcStatus === CALC_STATUS.CALC_ERROR
+  ).length;
   const waitingCloudCount = rows.filter(r => r.calcStatus === CALC_STATUS.WAITING_CLOUD || r.calcStatus === CALC_STATUS.CALCULATING).length;
   const calculatedCount = rows.filter(r => r.calcStatus === CALC_STATUS.CALCULATED).length;
 
@@ -902,6 +804,7 @@ export default function ExtractPdfPage() {
                 <div
                   key={folder.id}
                   onClick={() => {
+                    pdfFileRef.current = { folderId: null, file: null };
                     setCurrentFolder(folder);
                     setCurrentView('pages');
                   }}
@@ -998,7 +901,7 @@ export default function ExtractPdfPage() {
 
                 <button
                   onClick={() => setShowDownloadModal(true)}
-                  disabled={selectedRowIds.length === 0 || isCalculating || isSending}
+                  disabled={selectedRowIds.length === 0 || isCalculating}
                   className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-lg transition-colors"
                 >
                   <Download size={14} />

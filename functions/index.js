@@ -1,6 +1,8 @@
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const { PDFDocument } = require("pdf-lib");
+
+const DEFAULT_EXTRACT_PDF_WEBHOOK_URL = "https://n8n.cmg1.online/webhook/extractpdf";
 const FormData = require("form-data");
 const fetch = require("node-fetch");
 const fs = require("fs");
@@ -313,6 +315,7 @@ exports.syncGoogleSheetTagNos = functions
   });
 
 exports.processExtractPdf = functions
+  .runWith({ timeoutSeconds: 300, memory: "1GB" })
   .region("asia-southeast1") // Adjust region if needed, defaults to us-central1 if omitted, but let's use a safe default and the user can change it
   .firestore
   .document("QC-System/root/extractPdf/{docId}")
@@ -331,28 +334,39 @@ exports.processExtractPdf = functions
           updatedAt: admin.firestore.FieldValue.serverTimestamp()
         });
 
-        const { pdfStoragePath, page, webhookUrl, fileName, totalPages } = afterData;
+        const {
+          pdfStoragePath,
+          page,
+          webhookUrl = DEFAULT_EXTRACT_PDF_WEBHOOK_URL,
+          fileName,
+          totalPages,
+          folderId,
+        } = afterData;
 
         if (!pdfStoragePath) {
           throw new Error("Missing pdfStoragePath");
         }
-        if (!webhookUrl) {
-          throw new Error("Missing webhookUrl");
+        const requestedPage = Number(page);
+        if (!Number.isInteger(requestedPage) || requestedPage < 1) {
+          throw new Error(`Invalid page number: ${page}`);
         }
 
         // 1. Download PDF from Firebase Storage
-        console.log(`Downloading PDF from ${pdfStoragePath}`);
+        console.log(`Downloading PDF for folder ${folderId || "unknown"} from ${pdfStoragePath}`);
         const bucket = admin.storage().bucket();
         const file = bucket.file(pdfStoragePath);
         const [fileBuffer] = await file.download();
 
         // 2. Extract specific page using pdf-lib
-        console.log(`Extracting page ${page}`);
+        console.log(`Extracting page ${requestedPage}`);
         const pdfDoc = await PDFDocument.load(fileBuffer);
+        if (requestedPage > pdfDoc.getPageCount()) {
+          throw new Error(`Page ${requestedPage} exceeds PDF page count ${pdfDoc.getPageCount()}`);
+        }
         const newPdfDoc = await PDFDocument.create();
         
         // PDF-lib uses 0-based index for pages
-        const pageIndex = page - 1;
+        const pageIndex = requestedPage - 1;
         const [copiedPage] = await newPdfDoc.copyPages(pdfDoc, [pageIndex]);
         newPdfDoc.addPage(copiedPage);
         
@@ -360,7 +374,8 @@ exports.processExtractPdf = functions
         const singlePageBuffer = Buffer.from(singlePagePdfBytes);
 
         // 3. Send to n8n webhook
-        const singlePageFileName = `${fileName.replace(".pdf", "")}_page_${page}.pdf`;
+        const sourceFileName = fileName || path.basename(pdfStoragePath) || "document.pdf";
+        const singlePageFileName = `${sourceFileName.replace(/\.pdf$/i, "")}_page_${requestedPage}.pdf`;
         console.log(`Sending to n8n Webhook: ${webhookUrl}`);
         
         const formData = new FormData();
@@ -368,15 +383,32 @@ exports.processExtractPdf = functions
           filename: singlePageFileName,
           contentType: "application/pdf",
         });
-        formData.append("fileName", fileName);
-        formData.append("page", String(page));
-        formData.append("total", String(totalPages));
-        formData.append("pageNumber", String(page));
+        formData.append("fileName", sourceFileName);
+        formData.append("page", String(requestedPage));
+        formData.append("total", String(totalPages || pdfDoc.getPageCount()));
+        formData.append("pageNumber", String(requestedPage));
+        formData.append("folderId", String(folderId || ""));
+        formData.append("pdfStoragePath", pdfStoragePath);
 
-        const response = await fetch(webhookUrl, {
-          method: "POST",
-          body: formData,
-        });
+        // จบ request ก่อน timeout ของ Cloud Function เพื่อให้บันทึก calc_error
+        // และไม่ปล่อยให้หน้าเว็บส่งหน้าถัดไปซ้อนกับงานที่ค้างอยู่
+        const controller = new AbortController();
+        const webhookTimeout = setTimeout(() => controller.abort(), 240_000);
+        let response;
+        try {
+          response = await fetch(webhookUrl, {
+            method: "POST",
+            body: formData,
+            signal: controller.signal,
+          });
+        } catch (error) {
+          if (error.name === "AbortError") {
+            throw new Error("n8n webhook timed out after 240 seconds");
+          }
+          throw error;
+        } finally {
+          clearTimeout(webhookTimeout);
+        }
 
         if (!response.ok) {
           throw new Error(`n8n responded with status ${response.status}: ${response.statusText}`);
