@@ -42,6 +42,8 @@ const MATERIAL_APPROVAL_TABLE_COLUMNS = [
   { key: 'comments', label: 'Comments' },
 ];
 
+const MATERIAL_CATEGORY_GROUP = 'Material approved';
+
 const APPROVAL_BADGE = {
   'Approve': 'bg-green-100 text-green-700',
   'Approved': 'bg-green-100 text-green-700',
@@ -97,18 +99,42 @@ export default function MaterialsPage() {
 
   const canEditMaterial = canAction('materials', 'editMaterial');
 
+  const projectQcDocumentsByKey = useMemo(() => {
+    const map = new Map();
+    qcDocuments.forEach((doc) => {
+      if (doc.projectId !== selectedProjectId) return;
+      if (doc.id) map.set(doc.id, doc);
+      if (doc.documentNo) map.set(doc.documentNo, doc);
+    });
+    return map;
+  }, [qcDocuments, selectedProjectId]);
+
   const projectItems = useMemo(() => (
     qcDocuments.filter((doc) => (
       doc.projectId === selectedProjectId &&
-      doc.categoryGroup === 'Material approved'
+      doc.categoryGroup === MATERIAL_CATEGORY_GROUP
     ))
   ), [qcDocuments, selectedProjectId]);
 
   const projectApprovalItems = useMemo(() => (
     materialApprovals
-      .filter((item) => item.projectId === selectedProjectId)
+      .filter((item) => {
+        if (item.projectId !== selectedProjectId) return false;
+
+        const sourceDocument = (
+          projectQcDocumentsByKey.get(item.sourceDocId) ||
+          projectQcDocumentsByKey.get(item.documentNo) ||
+          projectQcDocumentsByKey.get(item.mapNo)
+        );
+
+        // Prefer the current QC Document Control classification. The saved
+        // value is only a fallback for legacy logs whose source was deleted.
+        return sourceDocument
+          ? sourceDocument.categoryGroup === MATERIAL_CATEGORY_GROUP
+          : item.categoryGroup === MATERIAL_CATEGORY_GROUP;
+      })
       .sort((a, b) => new Date(b.timestamp || b.approvalDate || 0) - new Date(a.timestamp || a.approvalDate || 0))
-  ), [materialApprovals, selectedProjectId]);
+  ), [materialApprovals, projectQcDocumentsByKey, selectedProjectId]);
 
   const projectItemsByKey = useMemo(() => {
     const map = new Map();
