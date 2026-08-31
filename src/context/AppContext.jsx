@@ -6,6 +6,8 @@ import {
   categories,
   subscribeCategory,
   updateItemSafe,
+  createCategoryItemIfAbsent,
+  replaceRfiCiAssignments,
 } from '../services/firestore';
 import { useAuth } from '../auth/AuthContext';
 import { ADMIN_ROLES } from '../auth/constants';
@@ -99,7 +101,7 @@ export function AppProvider({ children }) {
 
   const persist = async (fn) => {
     try {
-      await fn();
+      return await fn();
     } catch (err) {
       setFirestoreError(err?.message ?? 'บันทึก Firestore ไม่สำเร็จ');
       throw err;
@@ -184,6 +186,26 @@ export function AppProvider({ children }) {
   const addFinalPackage    = item    => addItemPersist(setFinalPackage, categories.finalPackage, item);
   const updateFinalPackage = (id, c, lu) => updateItemPersist(setFinalPackage, categories.finalPackage, id, c, lu);
   const deleteFinalPackage = id      => deleteItemPersist(setFinalPackage, categories.finalPackage, id);
+  const createFinalPackageItem = async (item) => {
+    await persist(() => createCategoryItemIfAbsent(categories.finalPackage, item));
+    setFinalPackage(prev => {
+      const byId = new Map(prev.map(current => [current.id, current]));
+      byId.set(item.id, { ...(byId.get(item.id) || {}), ...item });
+      return [...byId.values()];
+    });
+  };
+  const saveFinalPackageCiAssignments = async (input) => {
+    const resolvedItems = await persist(() => replaceRfiCiAssignments(input));
+    setFinalPackage(prev => {
+      const byId = new Map(prev.map(item => [item.id, item]));
+      resolvedItems.forEach(item => {
+        if (!item?.id) return;
+        byId.set(item.id, { ...(byId.get(item.id) || {}), ...item });
+      });
+      return [...byId.values()];
+    });
+    return resolvedItems;
+  };
 
   // ── Markup DWG ──────────────────────────────────────────────────────────────
   const addMarkupDwg    = item    => addItemPersist(setMarkupDwgItems, categories.markupDwg, item);
@@ -217,7 +239,7 @@ export function AppProvider({ children }) {
     ncrItems,     addNcr,         updateNcr,         deleteNcr,
     punchlist,    addPunch,       updatePunch,       deletePunch,
     handover,     addHandover,    updateHandover,    deleteHandover,
-    finalPackage, addFinalPackage, updateFinalPackage, deleteFinalPackage,
+    finalPackage, addFinalPackage, updateFinalPackage, deleteFinalPackage, createFinalPackageItem, saveFinalPackageCiAssignments,
     markupDwgItems, addMarkupDwg, updateMarkupDwg, deleteMarkupDwg,
     markupTagIdItems, addMarkupTagId, updateMarkupTagId, deleteMarkupTagId,
     extractPdfItems, addExtractPdf, updateExtractPdf, deleteExtractPdf,

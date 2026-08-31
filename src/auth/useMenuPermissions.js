@@ -12,13 +12,22 @@ const ROLE_PERM_DOC = `${APP_NAME}/root/appMeta/rolePermissions`;
 export function useMenuPermissions() {
   const { userProfile } = useAuth();
   const [rolePerms, setRolePerms] = useState({});
+  const [permissionsReady, setPermissionsReady] = useState(false);
+  const [permissionsError, setPermissionsError] = useState(null);
 
   useEffect(() => {
     const ref = doc(db, ROLE_PERM_DOC);
     const unsub = onSnapshot(
       ref,
-      snap => setRolePerms(snap.exists() ? (snap.data() || {}) : {}),
-      () => {},
+      (snap) => {
+        setRolePerms(snap.exists() ? (snap.data() || {}) : {});
+        setPermissionsError(null);
+        setPermissionsReady(true);
+      },
+      (error) => {
+        setPermissionsError(error?.message || 'Permission data could not be loaded');
+        setPermissionsReady(true);
+      },
     );
     return () => unsub();
   }, []);
@@ -58,6 +67,15 @@ export function useMenuPermissions() {
     });
   }
 
-  return { canRead, canAction, rolePerms, userRoles };
+  return {
+    canRead,
+    canAction,
+    rolePerms,
+    userRoles,
+    isAdmin,
+    hasConfig,
+    permissionsReady,
+    permissionsError,
+  };
 }
 

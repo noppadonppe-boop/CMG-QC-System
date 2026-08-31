@@ -1,4 +1,5 @@
-import { useState, useMemo, useRef, useEffect } from 'react';
+import { useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Plus, Pencil, Trash2, Search, ExternalLink,
   Layers, ChevronDown, ChevronLeft, ChevronRight, History, Eye, EyeOff,
@@ -55,6 +56,9 @@ const QC_DOC_TABLE_COLUMNS = [
   { key: 'actions', label: 'Actions', locked: true },
 ];
 
+// Filterable column keys (exclude row, attachments, actions)
+const FILTERABLE_COLS = ['transmittalNo','transRef','transDate','from','type','catGroup','cat','documentNo','documentTitle','receiveDate','revision','status','delivery'];
+
 // ── Column value extractor (for filter options) ───────────────────────────────
 function getDocFieldValue(doc, key) {
   switch (key) {
@@ -75,11 +79,33 @@ function getDocFieldValue(doc, key) {
   }
 }
 
+function matchesDocFilters(doc, globalQuery, columnFilters, excludedColumn = '') {
+  if (globalQuery) {
+    const allValues = [
+      doc.transmittalNo, doc.transmittalNoRef, doc.transmittalDate, doc.rfiNo,
+      doc.from, doc.isExternal ? 'External' : 'Internal',
+      doc.categoryGroup, doc.category, doc.documentNo, doc.documentTitle,
+      doc.receiveDate, doc.rev ? `Rev. ${doc.rev}` : '', doc.status,
+      doc.byEmail ? 'Email' : 'Hand',
+    ];
+    if (!allValues.some(value => (value || '').toLowerCase().includes(globalQuery))) return false;
+  }
+
+  for (const [key, values] of Object.entries(columnFilters)) {
+    if (key === excludedColumn || !values || values.length === 0) continue;
+    if (!values.includes(getDocFieldValue(doc, key))) return false;
+  }
+
+  return true;
+}
+
 // ── Per-Column Filter Dropdown ─────────────────────────────────────────────────
 function ColumnFilterDropdown({ colKey, label, allDocs, activeValues, onChange }) {
   const [open, setOpen]     = useState(false);
   const [search, setSearch] = useState('');
-  const ref                 = useRef(null);
+  const triggerRef          = useRef(null);
+  const dropdownRef         = useRef(null);
+  const [menuPosition, setMenuPosition] = useState(null);
 
   // Unique values for this column. Category Group also exposes blank values so
   // documents without a group can be filtered explicitly.
@@ -92,28 +118,78 @@ function ColumnFilterDropdown({ colKey, label, allDocs, activeValues, onChange }
     return [...set].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   }, [allDocs, colKey]);
 
-  const filtered = search ? options.filter(o => o.toLowerCase().includes(search.toLowerCase())) : options;
+  const normalizedSearch = search.trim().toLowerCase();
+  const filtered = normalizedSearch
+    ? options.filter(o => o.toLowerCase().includes(normalizedSearch))
+    : options;
   const hasActive = activeValues.length > 0;
 
-  // Close on outside click
+  const updateMenuPosition = useCallback(() => {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+
+    const triggerRect = trigger.getBoundingClientRect();
+    const menuWidth = 208;
+    const viewportPadding = 8;
+    const gap = 4;
+    const menuHeight = dropdownRef.current?.getBoundingClientRect().height || 320;
+    const maxLeft = Math.max(viewportPadding, window.innerWidth - menuWidth - viewportPadding);
+    const left = Math.min(
+      Math.max(viewportPadding, triggerRect.left + (triggerRect.width - menuWidth) / 2),
+      maxLeft,
+    );
+
+    let top = triggerRect.bottom + gap;
+    if (top + menuHeight > window.innerHeight - viewportPadding) {
+      const topAbove = triggerRect.top - menuHeight - gap;
+      top = topAbove >= viewportPadding
+        ? topAbove
+        : Math.max(viewportPadding, window.innerHeight - menuHeight - viewportPadding);
+    }
+
+    setMenuPosition({ top, left });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (open) updateMenuPosition();
+  }, [open, normalizedSearch, filtered.length, updateMenuPosition]);
+
+  // Keep a portalled dropdown aligned while the table or page scrolls.
   useEffect(() => {
     if (!open) return;
-    function handler(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [open]);
+    function handleOutsideClick(e) {
+      if (triggerRef.current?.contains(e.target) || dropdownRef.current?.contains(e.target)) return;
+      setOpen(false);
+      setMenuPosition(null);
+    }
+    document.addEventListener('mousedown', handleOutsideClick);
+    window.addEventListener('resize', updateMenuPosition);
+    document.addEventListener('scroll', updateMenuPosition, true);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+      window.removeEventListener('resize', updateMenuPosition);
+      document.removeEventListener('scroll', updateMenuPosition, true);
+    };
+  }, [open, updateMenuPosition]);
 
   function toggle(val) {
     onChange(activeValues.includes(val) ? activeValues.filter(v => v !== val) : [...activeValues, val]);
   }
 
-  function selectAll()   { onChange([...options]); }
+  function selectAll()   { if (filtered.length > 0) onChange([...filtered]); }
   function clearAll()    { onChange([]); }
 
   return (
-    <div ref={ref} className="relative inline-flex" onClick={e => e.stopPropagation()}>
+    <div className="relative inline-flex" onClick={e => e.stopPropagation()}>
       <button
-        onClick={() => setOpen(o => !o)}
+        onClick={() => {
+          setOpen(o => {
+            const nextOpen = !o;
+            if (!nextOpen) setMenuPosition(null);
+            return nextOpen;
+          });
+        }}
+        ref={triggerRef}
         title={`Filter by ${label}`}
         className={`ml-1.5 w-4 h-4 rounded flex items-center justify-center transition-all ${
           hasActive
@@ -124,12 +200,22 @@ function ColumnFilterDropdown({ colKey, label, allDocs, activeValues, onChange }
         <SlidersHorizontal size={9} />
       </button>
 
-      {open && (
-        <div className="absolute top-6 left-1/2 -translate-x-1/2 z-50 bg-white border border-slate-200 rounded-xl shadow-2xl w-52 overflow-hidden" style={{ minWidth: '180px' }}>
+      {open && createPortal(
+        <div
+          ref={dropdownRef}
+          className="fixed z-[60] bg-white border border-slate-200 rounded-xl shadow-2xl w-52 overflow-hidden"
+          style={{
+            minWidth: '180px',
+            top: menuPosition?.top ?? 0,
+            left: menuPosition?.left ?? 0,
+            visibility: menuPosition ? 'visible' : 'hidden',
+          }}
+          onClick={e => e.stopPropagation()}
+        >
           {/* Header */}
           <div className="px-3 py-2 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
             <span className="text-[10px] font-bold text-slate-700 uppercase tracking-wide">{label}</span>
-            <button onClick={() => setOpen(false)} className="text-slate-400 hover:text-slate-600">
+            <button onClick={() => { setOpen(false); setMenuPosition(null); }} className="text-slate-400 hover:text-slate-600">
               <X size={11} />
             </button>
           </div>
@@ -177,7 +263,8 @@ function ColumnFilterDropdown({ colKey, label, allDocs, activeValues, onChange }
               <span className="text-[9px] text-orange-600 font-medium">{activeValues.length} selected</span>
             </div>
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
@@ -568,42 +655,33 @@ export default function QcDocumentsPage() {
     setColumnFilters(prev => ({ ...prev, [key]: vals }));
   }
 
-  // Filterable column keys (exclude row, attachments, actions)
-  const FILTERABLE_COLS = ['transmittalNo','transRef','transDate','from','type','catGroup','cat','documentNo','documentTitle','receiveDate','revision','status','delivery'];
-
   const canAddTransmittal       = canAction('qc-documents', 'addTransmittal');
   const canDuplicateTransmittal = canAction('qc-documents', 'duplicateTransmittal');
   const canEditTransmittal      = canAction('qc-documents', 'editTransmittal');
   const canDeleteTransmittal    = canAction('qc-documents', 'deleteTransmittal');
 
   // Filter to selected project first
-  const projectDocs = qcDocuments.filter(d => d.projectId === selectedProjectId);
+  const projectDocs = useMemo(
+    () => qcDocuments.filter(d => d.projectId === selectedProjectId),
+    [qcDocuments, selectedProjectId],
+  );
+
+  const normalizedGlobalSearch = search.trim().toLowerCase();
 
   // Apply search + column filters
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return projectDocs.filter(d => {
-      // Global search: match any field value
-      if (q) {
-        const allValues = [
-          d.transmittalNo, d.transmittalNoRef, d.transmittalDate, d.rfiNo,
-          d.from, d.isExternal ? 'External' : 'Internal',
-          d.categoryGroup, d.category, d.documentNo, d.documentTitle,
-          d.receiveDate, d.rev ? `Rev. ${d.rev}` : '', d.status,
-          d.byEmail ? 'Email' : 'Hand',
-        ];
-        const match = allValues.some(v => (v || '').toLowerCase().includes(q));
-        if (!match) return false;
-      }
-      // Per-column filters
-      for (const [key, vals] of Object.entries(columnFilters)) {
-        if (!vals || vals.length === 0) continue;
-        const cellVal = getDocFieldValue(d, key);
-        if (!vals.includes(cellVal)) return false;
-      }
-      return true;
-    });
-  }, [projectDocs, search, columnFilters]);
+  const filtered = useMemo(
+    () => projectDocs.filter(doc => matchesDocFilters(doc, normalizedGlobalSearch, columnFilters)),
+    [projectDocs, normalizedGlobalSearch, columnFilters],
+  );
+
+  // Each dropdown is faceted by every active filter except its own column.
+  // This makes a second filter operate only on the rows allowed by the first.
+  const filterOptionDocs = useMemo(() => Object.fromEntries(
+    FILTERABLE_COLS.map(key => [
+      key,
+      projectDocs.filter(doc => matchesDocFilters(doc, normalizedGlobalSearch, columnFilters, key)),
+    ]),
+  ), [projectDocs, normalizedGlobalSearch, columnFilters]);
 
   // Build grouped structure: { documentNo -> [docs] }
   const grouped = useMemo(() => {
@@ -771,7 +849,7 @@ export default function QcDocumentsPage() {
                           <ColumnFilterDropdown
                             colKey={col.key}
                             label={col.label}
-                            allDocs={projectDocs}
+                            allDocs={filterOptionDocs[col.key] || []}
                             activeValues={columnFilters[col.key] || []}
                             onChange={vals => setColFilter(col.key, vals)}
                           />

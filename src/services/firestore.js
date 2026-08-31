@@ -102,6 +102,31 @@ export async function setCategoryBatch(category, items) {
 }
 
 /**
+ * Create a deterministic document only when its id is still unused. The
+ * transaction prevents two clients from silently overwriting the same item.
+ */
+export async function createCategoryItemIfAbsent(category, item) {
+  if (!item?.id) throw new Error('Document id is required');
+
+  const ref = docRef(category, item.id);
+  await runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(ref);
+    if (snapshot.exists()) {
+      const error = new Error('Document already exists');
+      error.code = 'ALREADY_EXISTS';
+      throw error;
+    }
+
+    const payload = { ...item };
+    delete payload.id;
+    const clean = stripUndefined(payload);
+    clean.createdAt = serverTimestamp();
+    clean.updatedAt = serverTimestamp();
+    transaction.set(ref, clean);
+  });
+}
+
+/**
  * Subscribe to a category in realtime. Returns unsubscribe function.
  * @param {string} category
  * @param {(docs: any[]) => void} onData
@@ -155,3 +180,115 @@ export const categories = {
   markupTagId:  'markupTagId',
   extractPdf:   'extractPdf',
 };
+
+/**
+ * Replace the CI choices for one RFI against the latest server state. Every
+ * referenced RFI, CI group, and relation is read before the writes so a
+ * concurrent edit causes Firestore to retry the complete selection.
+ */
+export async function replaceRfiCiAssignments({
+  projectId,
+  rfiId,
+  rfiNo,
+  assignments = [],
+}) {
+  const uniqueAssignments = [...new Map(
+    assignments
+      .filter(item => item?.id && item?.ciGroupId)
+      .map(item => [item.ciGroupId, item]),
+  ).values()];
+
+  return runTransaction(db, async (transaction) => {
+    const rfiRef = docRef(categories.rfi, rfiId);
+    const ciRefs = uniqueAssignments.map(item => docRef(categories.finalPackage, item.ciGroupId));
+    const linkRefs = uniqueAssignments.map(item => docRef(categories.finalPackage, item.id));
+    const [rfiSnapshot, ciSnapshots, linkSnapshots] = await Promise.all([
+      transaction.get(rfiRef),
+      Promise.all(ciRefs.map(ref => transaction.get(ref))),
+      Promise.all(linkRefs.map(ref => transaction.get(ref))),
+    ]);
+
+    if (!rfiSnapshot.exists() || rfiSnapshot.data().projectId !== projectId) {
+      const error = new Error('RFI reference changed');
+      error.code = 'REFERENCE_CHANGED';
+      throw error;
+    }
+
+    ciSnapshots.forEach((snapshot, index) => {
+      const data = snapshot.data();
+      if (
+        !snapshot.exists() ||
+        data.projectId !== projectId ||
+        data.recordType !== 'ci-group' ||
+        data.active === false
+      ) {
+        const error = new Error(`CI reference changed: ${uniqueAssignments[index].ciCode || ''}`);
+        error.code = 'REFERENCE_CHANGED';
+        throw error;
+      }
+    });
+
+    const resolvedItems = [];
+    uniqueAssignments.forEach((assignment, index) => {
+      const snapshot = linkSnapshots[index];
+      const existing = snapshot.data();
+      if (snapshot.exists() && (
+        existing.projectId !== projectId ||
+        existing.rfiId !== rfiId ||
+        existing.ciGroupId !== assignment.ciGroupId
+      )) {
+        const error = new Error('CI assignment id conflict');
+        error.code = 'DATA_CONFLICT';
+        throw error;
+      }
+
+      const isActive = snapshot.exists() && existing.active !== false;
+      const shouldBeActive = Boolean(assignment.active);
+      if (isActive === shouldBeActive) {
+        if (snapshot.exists()) {
+          resolvedItems.push(shouldBeActive
+            ? { ...existing, id: assignment.id }
+            : { id: assignment.id, active: false });
+        }
+        return;
+      }
+
+      if (shouldBeActive) {
+        const localItem = {
+          id: assignment.id,
+          recordType: 'ci-rfi-link',
+          schemaVersion: 1,
+          projectId,
+          rfiId,
+          ciGroupId: assignment.ciGroupId,
+          rfiNo,
+          ciCode: assignment.ciCode,
+          active: true,
+          unassignedAt: null,
+          ...(snapshot.exists() ? {} : { createdAt: new Date() }),
+        };
+        const remoteItem = stripUndefined({ ...localItem });
+        delete remoteItem.id;
+        if (!snapshot.exists()) remoteItem.createdAt = serverTimestamp();
+        remoteItem.updatedAt = serverTimestamp();
+        transaction.set(linkRefs[index], remoteItem, { merge: true });
+        resolvedItems.push(localItem);
+        return;
+      }
+
+      const localItem = {
+        id: assignment.id,
+        active: false,
+        unassignedAt: new Date(),
+      };
+      transaction.set(linkRefs[index], {
+        active: false,
+        unassignedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+      resolvedItems.push(localItem);
+    });
+
+    return resolvedItems;
+  });
+}
