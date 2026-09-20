@@ -9,7 +9,7 @@ import { useApp } from '../../context/AppContext';
 // ใช้ worker จาก unpkg (รองรับ pdfjs-dist v5+)
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
 
-const N8N_WEBHOOK_URL = import.meta.env.VITE_N8N_WEBHOOK_URL || 'https://n8n.cmg1.online/webhook/extractpdf';
+const N8N_WEBHOOK_URL = import.meta.env.VITE_N8N_WEBHOOK_URL || 'https://n8n.cmgautomation.online/webhook/extractpdf';
 
 // สถานะของแต่ละ row
 const STATUS = {

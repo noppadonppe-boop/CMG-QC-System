@@ -2,7 +2,7 @@ const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const { PDFDocument } = require("pdf-lib");
 
-const DEFAULT_EXTRACT_PDF_WEBHOOK_URL = "https://n8n.cmg1.online/webhook/extractpdf";
+const DEFAULT_EXTRACT_PDF_WEBHOOK_URL = "https://n8n.cmgautomation.online/webhook/extractpdf";
 const FormData = require("form-data");
 const fetch = require("node-fetch");
 const fs = require("fs");
