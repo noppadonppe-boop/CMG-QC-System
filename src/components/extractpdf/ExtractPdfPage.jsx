@@ -94,17 +94,11 @@ export default function ExtractPdfPage() {
   const fileInputRef = useRef(null);
   // Cache เฉพาะไฟล์ของโฟลเดอร์ปัจจุบัน เพื่อไม่ให้ไฟล์จากโฟลเดอร์ก่อนหน้าถูกนำไปใช้ต่อ
   const pdfFileRef = useRef({ folderId: null, file: null });
-  const extractPdfItemsRef = useRef(extractPdfItems);
 
   // Deletion states
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteStatus, setDeleteStatus] = useState('');
-
-  // ใช้ข้อมูล realtime ล่าสุดจาก Firestore ระหว่างรอผลคำนวณทีละหน้า
-  useEffect(() => {
-    extractPdfItemsRef.current = extractPdfItems;
-  }, [extractPdfItems]);
 
   // โหลดข้อมูลจาก Firestore
   useEffect(() => {
@@ -404,6 +398,16 @@ export default function ExtractPdfPage() {
     return filename.replace(/[\\/:*?"<>|]/g, '_');
   };
 
+  // Rows from the old browser-driven queue may be left in WAITING_CLOUD or
+  // calculating without queue metadata. Allow those legacy rows to be queued
+  // again, while never re-queueing a row owned by the new Cloud Function.
+  const canQueueCalculation = (row) => (
+    row.calcStatus === CALC_STATUS.WAITING
+    || row.calcStatus === CALC_STATUS.CALC_ERROR
+    || (row.calcStatus === CALC_STATUS.WAITING_CLOUD && !row.queueBatchId)
+    || (row.calcStatus === CALC_STATUS.CALCULATING && !row.queueWorkerId)
+  );
+
   // ── ฟังก์ชันดาวน์โหลด PDF แยกหน้าตามรายการที่เลือก ─────────────────────────────
   async function handleDownloadSelected() {
     if (selectedRowIds.length === 0) return;
@@ -576,43 +580,14 @@ export default function ExtractPdfPage() {
     }
   }
 
-  function waitForCalculationResult(rowId, requestId, timeoutMs = 280_000) {
-    return new Promise((resolve, reject) => {
-      const startedAt = Date.now();
-
-      const checkResult = () => {
-        const latestRow = extractPdfItemsRef.current?.find(item => item.id === rowId);
-        const isCurrentRequest = latestRow?.calculationRequestId === requestId;
-        const isFinished = latestRow?.calcStatus === CALC_STATUS.CALCULATED
-          || latestRow?.calcStatus === CALC_STATUS.CALC_ERROR;
-
-        if (isCurrentRequest && isFinished) {
-          resolve(latestRow);
-          return;
-        }
-
-        if (Date.now() - startedAt >= timeoutMs) {
-          reject(new Error('หมดเวลารอผลคำนวณ ระบบหยุดคิวเพื่อไม่ให้หน้าถัดไปทำงานซ้อนกัน'));
-          return;
-        }
-
-        setTimeout(checkResult, 500);
-      };
-
-      checkResult();
-    });
-  }
-
-  // ── คำนวน — ส่งทีละหน้าและรอผลก่อนส่งหน้าถัดไป ──
+  // ── คำนวณ — ลงคิวทั้งหมดให้ Cloud Function ทำงานเบื้องหลัง ──
   async function calculateAll() {
     if (!N8N_WEBHOOK_URL) {
       alert('กรุณาตั้งค่า VITE_N8N_WEBHOOK_URL ใน .env ก่อน');
       return;
     }
 
-    const waitingRows = rows.filter(r =>
-      r.calcStatus === CALC_STATUS.WAITING || r.calcStatus === CALC_STATUS.CALC_ERROR
-    );
+    const waitingRows = rows.filter(canQueueCalculation);
     if (!waitingRows.length) {
       alert('ไม่มีรายการที่รอคำนวน');
       return;
@@ -621,92 +596,58 @@ export default function ExtractPdfPage() {
     setIsCalculating(true);
     setCalcProgress({ current: 0, total: waitingRows.length });
 
-    let successCount = 0;
-    let errorCount = 0;
-    let queueStopped = false;
-    const calculationErrors = [];
-
-    // ส่ง 1 row แล้วรอจน Cloud Function/n8n จบ จึงเริ่ม row ถัดไป
-    for (let i = 0; i < waitingRows.length; i++) {
-      const row = waitingRows[i];
-      const calculationRequestId = `${Date.now()}-${row.id}-${i}`;
-
+    const queueBatchId = `${currentFolder?.id || 'extract'}-${Date.now()}`;
+    const queueRequestedAt = new Date().toISOString();
+    const queuedRows = waitingRows.map((row, index) => {
       const pdfStoragePath = row.pdfStoragePath || currentFolder?.pdfStoragePath || (
         currentFolder?.id && currentFolder?.fileName
           ? `extract-pdf/${selectedProjectId}/${currentFolder.id}/${currentFolder.fileName}`
           : ''
       );
+      const calculationRequestId = `${Date.now()}-${row.id}-${index}`;
 
-      try {
-        if (!pdfStoragePath) {
-          throw new Error('ไม่พบที่อยู่ไฟล์ใน Firebase Storage');
-        }
-
-        const updateData = {
+      return {
+        row,
+        updateData: {
           calcStatus: CALC_STATUS.WAITING_CLOUD,
+          queueStatus: 'queued',
+          queueBatchId,
+          queueOrder: `${queueRequestedAt}-${String(index).padStart(6, '0')}`,
+          queueRequestedAt,
           pdfStoragePath,
           fileName: row.fileName || currentFolder?.fileName || '',
           totalPages: row.totalPages || currentFolder?.totalPages || 0,
           webhookUrl: N8N_WEBHOOK_URL,
           calcResponse: null,
           calculationRequestId,
-          calculationRequestedAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        };
+          calculationRequestedAt: queueRequestedAt,
+          updatedAt: queueRequestedAt,
+        },
+      };
+    });
 
-        setRows(prev => prev.map(r => r.id === row.id ? { ...r, ...updateData } : r));
-        await updateExtractPdf(row.id, updateData);
-
-        console.log(`⏳ Page ${row.page} started from ${pdfStoragePath}`);
-        const result = await waitForCalculationResult(row.id, calculationRequestId);
-
-        if (result.calcStatus === CALC_STATUS.CALCULATED) {
-          successCount++;
-          console.log(`✅ Page ${row.page} completed`);
-        } else {
-          const resultError = typeof result.calcResponse === 'string'
-            ? result.calcResponse
-            : 'คำนวณไม่สำเร็จ';
-          errorCount++;
-          calculationErrors.push(`หน้า ${row.page}: ${resultError}`);
-          console.error(`❌ Page ${row.page} failed: ${resultError}`);
-        }
-      } catch (err) {
-        const errMsg = err.message || 'ไม่ทราบสาเหตุ';
-        errorCount++;
-        calculationErrors.push(`หน้า ${row.page}: ${errMsg}`);
-        console.error(`❌ Page ${row.page} queue stopped:`, err);
-
-        // หากหมดเวลารอ ห้ามส่งหน้าถัดไป เพราะงานเดิมอาจยังทำงานอยู่บนคลาวด์
-        if (/หมดเวลารอผลคำนวณ/.test(errMsg)) {
-          queueStopped = true;
-          setCalcProgress({ current: i + 1, total: waitingRows.length });
-          break;
-        }
-
-        const fail = {
-          calcStatus: CALC_STATUS.CALC_ERROR,
-          calcResponse: errMsg,
-          updatedAt: new Date().toISOString(),
-        };
-        setRows(prev => prev.map(r => r.id === row.id ? { ...r, ...fail } : r));
-        await updateExtractPdf(row.id, fail).catch(() => {});
+    const results = await Promise.allSettled(queuedRows.map(({ row, updateData }) => {
+      if (!updateData.pdfStoragePath) {
+        return Promise.reject(new Error(`หน้า ${row.page}: ไม่พบที่อยู่ไฟล์ใน Firebase Storage`));
       }
+      setRows(prev => prev.map(current => current.id === row.id ? { ...current, ...updateData } : current));
+      return updateExtractPdf(row.id, updateData);
+    }));
 
-      setCalcProgress({ current: i + 1, total: waitingRows.length });
-    }
-
+    const queuedCount = results.filter(result => result.status === 'fulfilled').length;
+    const failedCount = results.length - queuedCount;
+    setCalcProgress({ current: results.length, total: results.length });
     setIsCalculating(false);
-    const errorSummary = calculationErrors.length
-      ? `\n\nรายละเอียด:\n${calculationErrors.slice(0, 3).join('\n')}${calculationErrors.length > 3 ? `\nและอีก ${calculationErrors.length - 3} รายการ` : ''}`
-      : '';
-    const stoppedMessage = queueStopped ? '\nคิวถูกหยุดเพื่อป้องกันงานซ้อนกัน' : '';
-    alert(`คำนวณแบบทีละหน้าเสร็จแล้ว\nสำเร็จ: ${successCount} รายการ\nผิดพลาด: ${errorCount} รายการ${stoppedMessage}${errorSummary}`);
+
+    alert(
+      `ส่งเข้าคิว Cloud Function แล้ว ${queuedCount} รายการ\n` +
+      'ระบบจะดึง PDF จาก Storage และประมวลผลทีละหน้าเบื้องหลัง\n' +
+      'สามารถออกจากหน้านี้หรือไปเว็บไซต์อื่นได้' +
+      (failedCount ? `\n\nเพิ่มเข้าคิวไม่สำเร็จ ${failedCount} รายการ` : ''),
+    );
   }
 
-  const waitingCalcCount = rows.filter(r =>
-    r.calcStatus === CALC_STATUS.WAITING || r.calcStatus === CALC_STATUS.CALC_ERROR
-  ).length;
+  const waitingCalcCount = rows.filter(canQueueCalculation).length;
   const waitingCloudCount = rows.filter(r => r.calcStatus === CALC_STATUS.WAITING_CLOUD || r.calcStatus === CALC_STATUS.CALCULATING).length;
   const calculatedCount = rows.filter(r => r.calcStatus === CALC_STATUS.CALCULATED).length;
 

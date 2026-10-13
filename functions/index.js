@@ -3,6 +3,9 @@ const admin = require("firebase-admin");
 const { PDFDocument } = require("pdf-lib");
 
 const DEFAULT_EXTRACT_PDF_WEBHOOK_URL = "https://n8n.cmgautomation.online/webhook/extractpdf";
+const EXTRACT_PDF_COLLECTION_PATH = "QC-System/root/extractPdf";
+const EXTRACT_PDF_QUEUE_LOCK_PATH = "QC-System/root/extractPdfQueue/lock";
+const EXTRACT_PDF_QUEUE_LEASE_MS = 270_000;
 const FormData = require("form-data");
 const fetch = require("node-fetch");
 const fs = require("fs");
@@ -314,145 +317,268 @@ exports.syncGoogleSheetTagNos = functions
     });
   });
 
+function toMillis(value) {
+  if (!value) return 0;
+  if (typeof value.toMillis === "function") return value.toMillis();
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === "number") return value;
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function queueOrderFor(docId, data) {
+  // queueOrder is written by the client as a sortable string. Older rows do
+  // not have it, so keep them usable as a fallback.
+  return String(
+    data.queueOrder
+      || data.queueRequestedAt
+      || data.calculationRequestedAt
+      || data.createdAt
+      || docId,
+  );
+}
+
+async function kickExtractPdfQueue() {
+  const lockRef = admin.firestore().doc(EXTRACT_PDF_QUEUE_LOCK_PATH);
+  await lockRef.set({
+    queueKickAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+}
+
+async function claimNextExtractPdfJob() {
+  const db = admin.firestore();
+  const lockRef = db.doc(EXTRACT_PDF_QUEUE_LOCK_PATH);
+
+  return db.runTransaction(async (transaction) => {
+    const lockSnapshot = await transaction.get(lockRef);
+    const lockData = lockSnapshot.exists ? lockSnapshot.data() : {};
+    const now = Date.now();
+
+    if (lockData.activeDocId && toMillis(lockData.leaseUntil) > now) {
+      return null;
+    }
+
+    const waitingQuery = db.collection(EXTRACT_PDF_COLLECTION_PATH)
+      .where("calcStatus", "==", "WAITING_CLOUD");
+    const waitingSnapshot = await transaction.get(waitingQuery);
+    const waitingJobs = waitingSnapshot.docs
+      .map((snapshot) => ({
+        docId: snapshot.id,
+        ref: snapshot.ref,
+        data: snapshot.data(),
+      }))
+      .sort((left, right) => {
+        const order = queueOrderFor(left.docId, left.data)
+          .localeCompare(queueOrderFor(right.docId, right.data), undefined, { numeric: true });
+        return order || left.docId.localeCompare(right.docId);
+      });
+
+    if (!waitingJobs.length) {
+      if (lockSnapshot.exists && lockData.activeDocId) {
+        transaction.set(lockRef, {
+          activeDocId: null,
+          activeWorkerId: null,
+          leaseUntil: null,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+      }
+      return null;
+    }
+
+    const job = waitingJobs[0];
+    const workerId = `${job.docId}-${now}-${Math.random().toString(36).slice(2, 8)}`;
+    const leaseUntil = new Date(now + EXTRACT_PDF_QUEUE_LEASE_MS);
+
+    transaction.update(job.ref, {
+      calcStatus: "calculating",
+      queueStatus: "processing",
+      queueWorkerId: workerId,
+      queueStartedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    transaction.set(lockRef, {
+      activeDocId: job.docId,
+      activeWorkerId: workerId,
+      leaseUntil,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    return { ...job, workerId };
+  });
+}
+
+async function releaseExtractPdfQueueLock(docId, workerId) {
+  const db = admin.firestore();
+  const lockRef = db.doc(EXTRACT_PDF_QUEUE_LOCK_PATH);
+
+  await db.runTransaction(async (transaction) => {
+    const lockSnapshot = await transaction.get(lockRef);
+    const lockData = lockSnapshot.exists ? lockSnapshot.data() : {};
+    if (lockData.activeDocId !== docId || lockData.activeWorkerId !== workerId) return;
+
+    transaction.set(lockRef, {
+      activeDocId: null,
+      activeWorkerId: null,
+      leaseUntil: null,
+      // This update wakes the queue worker for the next row.
+      queueKickAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+  });
+}
+
+async function processExtractPdfJob(job) {
+  const { docId, data } = job;
+  const jobRef = admin.firestore().doc(`${EXTRACT_PDF_COLLECTION_PATH}/${docId}`);
+
+  try {
+    const {
+      pdfStoragePath,
+      page,
+      webhookUrl = DEFAULT_EXTRACT_PDF_WEBHOOK_URL,
+      fileName,
+      totalPages,
+      folderId,
+    } = data;
+
+    if (!pdfStoragePath) throw new Error("Missing pdfStoragePath");
+    const requestedPage = Number(page);
+    if (!Number.isInteger(requestedPage) || requestedPage < 1) {
+      throw new Error(`Invalid page number: ${page}`);
+    }
+
+    // The browser only queues metadata. The worker downloads the source PDF
+    // from Firebase Storage and creates the single-page payload server-side.
+    console.log(`Downloading PDF for folder ${folderId || "unknown"} from ${pdfStoragePath}`);
+    const bucket = admin.storage().bucket();
+    const file = bucket.file(pdfStoragePath);
+    const [fileBuffer] = await file.download();
+
+    console.log(`Extracting page ${requestedPage}`);
+    const pdfDoc = await PDFDocument.load(fileBuffer);
+    if (requestedPage > pdfDoc.getPageCount()) {
+      throw new Error(`Page ${requestedPage} exceeds PDF page count ${pdfDoc.getPageCount()}`);
+    }
+    const newPdfDoc = await PDFDocument.create();
+    const [copiedPage] = await newPdfDoc.copyPages(pdfDoc, [requestedPage - 1]);
+    newPdfDoc.addPage(copiedPage);
+    const singlePageBuffer = Buffer.from(await newPdfDoc.save());
+
+    const sourceFileName = fileName || path.basename(pdfStoragePath) || "document.pdf";
+    const singlePageFileName = `${sourceFileName.replace(/\.pdf$/i, "")}_page_${requestedPage}.pdf`;
+    console.log(`Sending to n8n Webhook: ${webhookUrl}`);
+
+    const formData = new FormData();
+    formData.append("file", singlePageBuffer, {
+      filename: singlePageFileName,
+      contentType: "application/pdf",
+    });
+    formData.append("fileName", sourceFileName);
+    formData.append("page", String(requestedPage));
+    formData.append("total", String(totalPages || pdfDoc.getPageCount()));
+    formData.append("pageNumber", String(requestedPage));
+    formData.append("folderId", String(folderId || ""));
+    formData.append("pdfStoragePath", pdfStoragePath);
+
+    const controller = new AbortController();
+    const webhookTimeout = setTimeout(() => controller.abort(), 240_000);
+    let response;
+    try {
+      response = await fetch(webhookUrl, {
+        method: "POST",
+        body: formData,
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (error.name === "AbortError") {
+        throw new Error("n8n webhook timed out after 240 seconds");
+      }
+      throw error;
+    } finally {
+      clearTimeout(webhookTimeout);
+    }
+
+    const responseText = await response.text();
+    if (!response.ok) {
+      const responseDetail = responseText ? `: ${responseText.slice(0, 500)}` : "";
+      throw new Error(`n8n responded with status ${response.status}: ${response.statusText}${responseDetail}`);
+    }
+
+    let responseData = null;
+    if (responseText) {
+      try {
+        responseData = JSON.parse(responseText);
+      } catch (error) {
+        console.log("n8n returned non-JSON response; preserving it as text.", error.message);
+        responseData = responseText.slice(0, 2000);
+      }
+    }
+
+    const updatedData = {
+      calcStatus: "calculated",
+      queueStatus: "completed",
+      calcResponse: responseData,
+      queueFinishedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+
+    if (responseData && typeof responseData === "object") {
+      if (responseData.dwgNo || responseData.dwgno || responseData.DWG_NO) {
+        updatedData.dwgNo = responseData.dwgNo || responseData.dwgno || responseData.DWG_NO;
+      }
+      if (responseData.title || responseData.TITLE) {
+        updatedData.title = responseData.title || responseData.TITLE;
+      }
+      if (responseData.rev || responseData.REV) {
+        updatedData.rev = responseData.rev || responseData.REV;
+      }
+    }
+
+    console.log(`Updating document ${docId} with result`);
+    await jobRef.update(updatedData);
+  } catch (error) {
+    console.error(`Error processing extract PDF job ${docId}:`, error);
+    await jobRef.update({
+      calcStatus: "calc_error",
+      queueStatus: "error",
+      calcResponse: error.message || String(error),
+      queueFinishedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  }
+}
+
+// A row update only wakes the queue. It does not process the PDF itself, so
+// closing the browser after enqueueing does not interrupt the work.
 exports.processExtractPdf = functions
-  .runWith({ timeoutSeconds: 300, memory: "1GB" })
-  .region("asia-southeast1") // Adjust region if needed, defaults to us-central1 if omitted, but let's use a safe default and the user can change it
+  .runWith({ timeoutSeconds: 60, memory: "256MB" })
+  .region("asia-southeast1")
   .firestore
-  .document("QC-System/root/extractPdf/{docId}")
-  .onUpdate(async (change, context) => {
+  .document(`${EXTRACT_PDF_COLLECTION_PATH}/{docId}`)
+  .onUpdate(async (change) => {
     const beforeData = change.before.data();
     const afterData = change.after.data();
+    if (afterData.calcStatus !== "WAITING_CLOUD" || beforeData.calcStatus === "WAITING_CLOUD") return;
+    await kickExtractPdfQueue();
+  });
 
-    // Check if calcStatus changed to WAITING_CLOUD
-    if (afterData.calcStatus === "WAITING_CLOUD" && beforeData.calcStatus !== "WAITING_CLOUD") {
-      const docId = context.params.docId;
-      
-      try {
-        // Update status to CALCULATING
-        await change.after.ref.update({
-          calcStatus: "calculating",
-          updatedAt: admin.firestore.FieldValue.serverTimestamp()
-        });
+// Firestore is used as a durable queue and lock. Each invocation claims one
+// row, processes it, releases the lock, and wakes the next invocation.
+exports.processExtractPdfQueue = functions
+  .runWith({ timeoutSeconds: 300, memory: "1GB" })
+  .region("asia-southeast1")
+  .firestore
+  .document(EXTRACT_PDF_QUEUE_LOCK_PATH)
+  .onWrite(async (change) => {
+    if (!change.after.exists) return;
 
-        const {
-          pdfStoragePath,
-          page,
-          webhookUrl = DEFAULT_EXTRACT_PDF_WEBHOOK_URL,
-          fileName,
-          totalPages,
-          folderId,
-        } = afterData;
+    const job = await claimNextExtractPdfJob();
+    if (!job) return;
 
-        if (!pdfStoragePath) {
-          throw new Error("Missing pdfStoragePath");
-        }
-        const requestedPage = Number(page);
-        if (!Number.isInteger(requestedPage) || requestedPage < 1) {
-          throw new Error(`Invalid page number: ${page}`);
-        }
-
-        // 1. Download PDF from Firebase Storage
-        console.log(`Downloading PDF for folder ${folderId || "unknown"} from ${pdfStoragePath}`);
-        const bucket = admin.storage().bucket();
-        const file = bucket.file(pdfStoragePath);
-        const [fileBuffer] = await file.download();
-
-        // 2. Extract specific page using pdf-lib
-        console.log(`Extracting page ${requestedPage}`);
-        const pdfDoc = await PDFDocument.load(fileBuffer);
-        if (requestedPage > pdfDoc.getPageCount()) {
-          throw new Error(`Page ${requestedPage} exceeds PDF page count ${pdfDoc.getPageCount()}`);
-        }
-        const newPdfDoc = await PDFDocument.create();
-        
-        // PDF-lib uses 0-based index for pages
-        const pageIndex = requestedPage - 1;
-        const [copiedPage] = await newPdfDoc.copyPages(pdfDoc, [pageIndex]);
-        newPdfDoc.addPage(copiedPage);
-        
-        const singlePagePdfBytes = await newPdfDoc.save();
-        const singlePageBuffer = Buffer.from(singlePagePdfBytes);
-
-        // 3. Send to n8n webhook
-        const sourceFileName = fileName || path.basename(pdfStoragePath) || "document.pdf";
-        const singlePageFileName = `${sourceFileName.replace(/\.pdf$/i, "")}_page_${requestedPage}.pdf`;
-        console.log(`Sending to n8n Webhook: ${webhookUrl}`);
-        
-        const formData = new FormData();
-        formData.append("file", singlePageBuffer, {
-          filename: singlePageFileName,
-          contentType: "application/pdf",
-        });
-        formData.append("fileName", sourceFileName);
-        formData.append("page", String(requestedPage));
-        formData.append("total", String(totalPages || pdfDoc.getPageCount()));
-        formData.append("pageNumber", String(requestedPage));
-        formData.append("folderId", String(folderId || ""));
-        formData.append("pdfStoragePath", pdfStoragePath);
-
-        // จบ request ก่อน timeout ของ Cloud Function เพื่อให้บันทึก calc_error
-        // และไม่ปล่อยให้หน้าเว็บส่งหน้าถัดไปซ้อนกับงานที่ค้างอยู่
-        const controller = new AbortController();
-        const webhookTimeout = setTimeout(() => controller.abort(), 240_000);
-        let response;
-        try {
-          response = await fetch(webhookUrl, {
-            method: "POST",
-            body: formData,
-            signal: controller.signal,
-          });
-        } catch (error) {
-          if (error.name === "AbortError") {
-            throw new Error("n8n webhook timed out after 240 seconds");
-          }
-          throw error;
-        } finally {
-          clearTimeout(webhookTimeout);
-        }
-
-        if (!response.ok) {
-          throw new Error(`n8n responded with status ${response.status}: ${response.statusText}`);
-        }
-
-        let responseData = null;
-        try {
-          const text = await response.text();
-          if (text) {
-            responseData = JSON.parse(text);
-          }
-        } catch (err) {
-          console.log("Failed to parse n8n response as JSON, ignoring.", err);
-        }
-
-        // 4. Update Firestore with success and metadata
-        const updatedData = {
-          calcStatus: "calculated",
-          calcResponse: responseData || null,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        };
-
-        if (responseData) {
-          if (responseData.dwgNo || responseData.dwgno || responseData.DWG_NO) {
-            updatedData.dwgNo = responseData.dwgNo || responseData.dwgno || responseData.DWG_NO;
-          }
-          if (responseData.title || responseData.TITLE) {
-            updatedData.title = responseData.title || responseData.TITLE;
-          }
-          if (responseData.rev || responseData.REV) {
-            updatedData.rev = responseData.rev || responseData.REV;
-          }
-        }
-
-        console.log(`Updating document ${docId} with result`);
-        await change.after.ref.update(updatedData);
-
-      } catch (error) {
-        console.error("Error processing extract PDF:", error);
-        await change.after.ref.update({
-          calcStatus: "calc_error",
-          calcResponse: error.message,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
-      }
+    try {
+      await processExtractPdfJob(job);
+    } finally {
+      await releaseExtractPdfQueueLock(job.docId, job.workerId);
     }
   });
